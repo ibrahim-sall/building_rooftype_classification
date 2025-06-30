@@ -206,8 +206,12 @@ def build_fine_tuned_vgg16():
     return Model(inputs, outputs)
 
 # Create model or load existing one
-model_path = "fine_tuned_vgg16_final.wheight.h5"
+models_dir = "models"
+model_path = os.path.join(models_dir, "fine_tuned_vgg16_final.wheight.h5")
 skip_training = False
+
+# Ensure models directory exists
+os.makedirs(models_dir, exist_ok=True)
 
 if os.path.exists(model_path) and not FORCE_RETRAIN:
     print(f"\n{'='*50}")
@@ -289,7 +293,7 @@ else:
 # Setup callbacks (only if training)
 if not skip_training:
     callbacks = [
-        CSVLogger('fine_tuned_vgg16_training.log', separator=','),
+        CSVLogger(os.path.join(models_dir, 'fine_tuned_vgg16_training.log'), separator=','),
         EarlyStopping(
             monitor='val_accuracy',
             patience=10,
@@ -297,7 +301,7 @@ if not skip_training:
             verbose=1
         ),
         ModelCheckpoint(
-            'best_fine_tuned_vgg16.h5',
+            os.path.join(models_dir, 'best_fine_tuned_vgg16.h5'),
             monitor='val_accuracy',
             mode='max',
             save_best_only=True,
@@ -462,8 +466,8 @@ if not skip_training:
         plt.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(f'fine_tuned_vgg16_training_history{title_suffix.lower().replace(" ", "_")}.png', 
-                    dpi=300, bbox_inches='tight')
+        history_plot_path = os.path.join(models_dir, f'fine_tuned_vgg16_training_history{title_suffix.lower().replace(" ", "_")}.png')
+        plt.savefig(history_plot_path, dpi=300, bbox_inches='tight')
         plt.show()
 
     print("\n" + "="*50)
@@ -533,7 +537,8 @@ axes[1].set_xlabel('Predicted Label', fontsize=14)
 axes[1].set_ylabel('True Label', fontsize=14)
 
 plt.tight_layout()
-plt.savefig('fine_tuned_vgg16_confusion_matrices.png', dpi=300, bbox_inches='tight')
+confusion_matrix_path = os.path.join(models_dir, 'fine_tuned_vgg16_confusion_matrices.png')
+plt.savefig(confusion_matrix_path, dpi=300, bbox_inches='tight')
 plt.show()
 
 # Classification report
@@ -561,27 +566,31 @@ if not skip_training:
     model_name = "fine_tuned_vgg16_final"
 
     # Save as .keras file (recommended native format)
-    fine_tuned_vgg16.save(f"{model_name}.keras")
-    print(f"Model saved as {model_name}.keras")
+    keras_path = os.path.join(models_dir, f"{model_name}.keras")
+    fine_tuned_vgg16.save(keras_path)
+    print(f"Model saved as {keras_path}")
 
     # Save in SavedModel format for deployment
+    savedmodel_path = os.path.join(models_dir, f"{model_name}_savedmodel")
     try:
-        fine_tuned_vgg16.export(f"{model_name}_savedmodel")
-        print(f"Model exported as {model_name}_savedmodel (SavedModel format)")
+        fine_tuned_vgg16.export(savedmodel_path)
+        print(f"Model exported as {savedmodel_path} (SavedModel format)")
     except AttributeError:
         # Fallback for older TensorFlow versions
-        fine_tuned_vgg16.save(f"{model_name}_savedmodel", save_format='tf')
-        print(f"Model saved as {model_name}_savedmodel (SavedModel format)")
+        fine_tuned_vgg16.save(savedmodel_path, save_format='tf')
+        print(f"Model saved as {savedmodel_path} (SavedModel format)")
 
     # Save weights only
-    fine_tuned_vgg16.save_weights(f"{model_name}.weights.h5")
-    print(f"Model weights saved as {model_name}.weights.h5")
+    weights_path = os.path.join(models_dir, f"{model_name}.weights.h5")
+    fine_tuned_vgg16.save_weights(weights_path)
+    print(f"Model weights saved as {weights_path}")
 
     # Save training history
     import pickle
-    with open(f"{model_name}_history.pkl", 'wb') as f:
+    history_path = os.path.join(models_dir, f"{model_name}_history.pkl")
+    with open(history_path, 'wb') as f:
         pickle.dump(combined_history, f)
-    print(f"Training history saved as {model_name}_history.pkl")
+    print(f"Training history saved as {history_path}")
 else:
     print("\n" + "="*50)
     print("MODEL ALREADY EXISTS - SKIPPING SAVE")

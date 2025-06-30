@@ -109,7 +109,8 @@ CLASS_COLORS = {
 }
 
 def find_best_model():
-    """Automatically find the best available model in the current directory."""
+    """Automatically find the best available model in the models directory."""
+    models_dir = "models"
     model_candidates = [
         "fine_tuned_vgg16_final.keras",
         "best_fine_tuned_vgg16.keras",
@@ -119,13 +120,18 @@ def find_best_model():
         "fine_tuned_vgg16_final_savedmodel"
     ]
     
-    for model_path in model_candidates:
+    # Check if models directory exists
+    if not os.path.exists(models_dir):
+        raise FileNotFoundError(f"Models directory '{models_dir}' not found!")
+    
+    for model_name in model_candidates:
+        model_path = os.path.join(models_dir, model_name)
         if os.path.exists(model_path):
             return model_path
     
     raise FileNotFoundError(
-        "No trained model found! Please ensure you have one of the following files:\n" +
-        "\n".join([f"  - {path}" for path in model_candidates])
+        f"No trained model found in '{models_dir}' directory! Please ensure you have one of the following files:\n" +
+        "\n".join([f"  - {models_dir}/{path}" for path in model_candidates])
     )
 
 def load_trained_model(model_path=None):
