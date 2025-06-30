@@ -4,13 +4,15 @@ Building Roof Type Classification - Footprint-Based Inference
 
 This script performs roof type classification on existing building footprint shapefiles
 by extracting roof areas from orthophotos and adding classification labels to the footprints.
+Optionally, it can also extract height statistics from Digital Surface Models (DSM).
 
 **WORKFLOW**:
 1. Read building footprint shapefiles from 'footprints' directory
 2. For each footprint, extract the corresponding roof area from orthophoto
 3. Classify the roof type using the trained model
-4. Add classification labels and confidence scores to the footprint attributes
-5. Save the labeled footprints as new shapefiles
+4. Optionally, extract height statistics from DSM if provided
+5. Add classification labels, confidence scores, and height data to the footprint attributes
+6. Save the labeled footprints as new shapefiles
 
 **MULTI-CHANNEL SUPPORT**: This script handles various orthophoto formats including:
 - RGB (3-channel)
@@ -19,13 +21,20 @@ by extracting roof areas from orthophotos and adding classification labels to th
 - Multi-spectral images (>4 channels - uses first 3)
 - Grayscale (converted to RGB)
 
+**DSM SUPPORT**: When DSM files are provided, the script extracts:
+- Mean height of the building footprint
+- Minimum and maximum heights
+- Standard deviation of heights
+- Number of valid height pixels
+
 Features:
 1. **Footprint-Based Classification**: Uses existing building footprints as input
 2. **Multi-Channel Image Support**: Automatically handles 3, 4, or more channel images
 3. **Geographic Coordinate Support**: Works with georeferenced orthophotos and footprints
-4. **Confidence Scoring**: Provides classification confidence for each footprint
-5. **Batch Processing**: Process multiple orthophotos and their corresponding footprints
-6. **Labeled Output**: Creates new shapefiles with roof type classifications
+4. **Height Extraction**: Optional DSM processing for building height statistics
+5. **Confidence Scoring**: Provides classification confidence for each footprint
+6. **Batch Processing**: Process multiple orthophotos and their corresponding footprints
+7. **Labeled Output**: Creates new shapefiles with roof type classifications and heights
 
 Directory Structure Expected:
     input_dir/
@@ -35,10 +44,19 @@ Directory Structure Expected:
         ├── orthophoto1_footprints.shp
         ├── orthophoto2_footprints.shp
         └── ...
+    
+    Optional DSM Structure:
+    dsm_dir/ (or same as input_dir)
+    ├── orthophoto1_dsm.tif
+    ├── orthophoto2_dsm.tif
+    └── ...
 
 Usage Examples:
     # Basic footprint classification
     python orthophoto_inference.py --input_dir test_orthophotos/
+    
+    # With DSM for height extraction
+    python orthophoto_inference.py --input_dir test_orthophotos/ --dsm_dir test_dsm/
     
     # With custom confidence threshold
     python orthophoto_inference.py --input_dir test_orthophotos/ --confidence_threshold 0.8
@@ -47,7 +65,7 @@ Usage Examples:
     python orthophoto_inference.py --input_dir test_orthophotos/ --visualize
     
     # Complete output with all options
-    python orthophoto_inference.py --input_dir test_orthophotos/ --visualize --output_csv results.csv
+    python orthophoto_inference.py --input_dir test_orthophotos/ --dsm_dir test_dsm/ --visualize --output_csv results.csv
 
 Supported Image Formats:
     - Standard: .jpg, .jpeg, .png, .bmp, .tiff, .tif, .webp
@@ -59,7 +77,8 @@ Requirements:
 
 Note: This approach requires existing building footprint shapefiles and corresponding
 georeferenced orthophotos. The footprints and orthophotos must be in the same
-coordinate reference system for accurate roof extraction.
+coordinate reference system for accurate roof extraction. DSM files are optional
+but must also be in the same coordinate system if provided.
 """
 
 import os
@@ -149,15 +168,16 @@ def load_trained_model(model_path=None):
         print(f"Error loading model: {e}")
         sys.exit(1)
 
-def get_orthophoto_footprint_pairs(input_dir):
+def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None):
     """
-    Get pairs of orthophotos and their corresponding footprint shapefiles.
+    Get triplets of orthophotos, their corresponding footprint shapefiles, and DSM files.
     
     Args:
         input_dir: Directory containing orthophotos and footprints subdirectory
+        dsm_dir: Optional directory containing DSM files (if None, looks for DSM files in input_dir)
     
     Returns:
-        List of tuples: (orthophoto_path, footprint_path)
+        List of tuples: (orthophoto_path, footprint_path, dsm_path or None)
     """
     if not os.path.exists(input_dir):
         raise FileNotFoundError(f"Directory not found: {input_dir}")
@@ -166,7 +186,14 @@ def get_orthophoto_footprint_pairs(input_dir):
     if not os.path.exists(footprints_dir):
         raise FileNotFoundError(f"Footprints directory not found: {footprints_dir}")
     
-    pairs = []
+    # Set DSM directory
+    if dsm_dir is None:
+        dsm_dir = input_dir
+    elif not os.path.exists(dsm_dir):
+        print(f"⚠️  DSM directory not found: {dsm_dir}, skipping DSM processing")
+        dsm_dir = None
+    
+    triplets = []
     
     # Get all orthophoto files
     for filename in os.listdir(input_dir):
@@ -190,16 +217,113 @@ def get_orthophoto_footprint_pairs(input_dir):
                     footprint_path = potential_path
                     break
             
+            # Look for corresponding DSM file if DSM directory is available
+            dsm_path = None
+            if dsm_dir:
+                possible_dsm_names = [
+                    f"{base_name}_dsm.tif",
+                    f"{base_name}_DSM.tif",
+                    f"{base_name}.tif",
+                    f"{base_name}_height.tif",
+                    f"{base_name}_heights.tif"
+                ]
+                
+                for dsm_name in possible_dsm_names:
+                    potential_dsm_path = os.path.join(dsm_dir, dsm_name)
+                    if os.path.exists(potential_dsm_path):
+                        dsm_path = potential_dsm_path
+                        break
+            
             if footprint_path:
-                pairs.append((orthophoto_path, footprint_path))
-                print(f"✅ Found pair: {filename} -> {os.path.basename(footprint_path)}")
+                triplets.append((orthophoto_path, footprint_path, dsm_path))
+                dsm_status = f" + DSM: {os.path.basename(dsm_path)}" if dsm_path else " (no DSM)"
+                print(f"✅ Found: {filename} -> {os.path.basename(footprint_path)}{dsm_status}")
             else:
                 print(f"⚠️  No footprint shapefile found for {filename}")
     
-    if not pairs:
+    if not triplets:
         raise ValueError(f"No orthophoto-footprint pairs found in {input_dir}")
     
-    return pairs
+    return triplets
+
+def get_orthophoto_footprint_pairs(input_dir):
+    """
+    Get pairs of orthophotos and their corresponding footprint shapefiles.
+    
+    Args:
+        input_dir: Directory containing orthophotos and footprints subdirectory
+    
+    Returns:
+        List of tuples: (orthophoto_path, footprint_path)
+    """
+    # Use the new triplet function but only return pairs (ignore DSM)
+    triplets = get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None)
+    return [(ortho, footprint) for ortho, footprint, _ in triplets]
+
+def extract_footprint_height(dsm_path, footprint_geometry):
+    """
+    Extract height statistics from DSM for a building footprint.
+    
+    Args:
+        dsm_path: Path to the Digital Surface Model (DSM)
+        footprint_geometry: Shapely geometry of the building footprint
+    
+    Returns:
+        Dictionary with height statistics, or None if extraction fails
+    """
+    if not GIS_AVAILABLE:
+        return None
+    
+    try:
+        with rasterio.open(dsm_path) as dsm_src:
+            # Get the bounds of the footprint
+            minx, miny, maxx, maxy = footprint_geometry.bounds
+            
+            # Convert geographic coordinates to pixel coordinates
+            transform = dsm_src.transform
+            px1, py1 = ~transform * (minx, maxy)  # top-left
+            px2, py2 = ~transform * (maxx, miny)  # bottom-right
+            
+            # Ensure proper order and bounds
+            row_start = max(0, int(min(py1, py2)))
+            row_end = min(dsm_src.height, int(max(py1, py2)) + 1)
+            col_start = max(0, int(min(px1, px2)))
+            col_end = min(dsm_src.width, int(max(px1, px2)) + 1)
+            
+            # Check if the area is valid
+            if row_end <= row_start or col_end <= col_start:
+                return None
+            
+            # Read the DSM data
+            dsm_window = dsm_src.read(1, window=((row_start, row_end), (col_start, col_end)))
+            
+            # Remove NoData values
+            if dsm_src.nodata is not None:
+                valid_mask = dsm_window != dsm_src.nodata
+                if not np.any(valid_mask):
+                    return None
+                dsm_values = dsm_window[valid_mask]
+            else:
+                # Filter out common NoData values and extreme outliers
+                valid_mask = (dsm_window != -9999) & (dsm_window != -32768) & (~np.isnan(dsm_window))
+                if not np.any(valid_mask):
+                    return None
+                dsm_values = dsm_window[valid_mask]
+            
+            # Calculate statistics
+            if len(dsm_values) > 0:
+                return {
+                    'mean_height': float(np.mean(dsm_values)),
+                    'min_height': float(np.min(dsm_values)),
+                    'max_height': float(np.max(dsm_values)),
+                    'std_height': float(np.std(dsm_values)),
+                    'pixel_count': len(dsm_values)
+                }
+            else:
+                return None
+                
+    except Exception as e:
+        return None
 
 def extract_footprint_image(orthophoto_path, footprint_geometry, buffer_pixels=10):
     """
@@ -306,7 +430,7 @@ def classify_footprint_image(model, footprint_image):
         print(f"❌ Error classifying footprint: {e}")
         return None
 
-def process_footprints(model, orthophoto_path, footprint_path, confidence_threshold=0.5):
+def process_footprints(model, orthophoto_path, footprint_path, confidence_threshold=0.5, dsm_path=None):
     """
     Process building footprints by classifying roof types from orthophoto.
     
@@ -315,6 +439,7 @@ def process_footprints(model, orthophoto_path, footprint_path, confidence_thresh
         orthophoto_path: Path to orthophoto image
         footprint_path: Path to footprint shapefile
         confidence_threshold: Minimum confidence for valid classifications
+        dsm_path: Optional path to Digital Surface Model for height extraction
     
     Returns:
         GeoDataFrame with classified footprints
@@ -325,6 +450,8 @@ def process_footprints(model, orthophoto_path, footprint_path, confidence_thresh
     
     print(f"Processing footprints from: {os.path.basename(footprint_path)}")
     print(f"Using orthophoto: {os.path.basename(orthophoto_path)}")
+    if dsm_path:
+        print(f"Using DSM: {os.path.basename(dsm_path)}")
     
     try:
         # Load footprints shapefile
@@ -340,11 +467,31 @@ def process_footprints(model, orthophoto_path, footprint_path, confidence_thresh
         for class_name in CLASS_NAMES:
             footprints_gdf[f'prob_{class_name[:8]}'] = 0.0
         
+        # Add height columns if DSM is provided
+        if dsm_path:
+            footprints_gdf['mean_height'] = np.nan
+            footprints_gdf['min_height'] = np.nan
+            footprints_gdf['max_height'] = np.nan
+            footprints_gdf['std_height'] = np.nan
+            footprints_gdf['height_px'] = 0  # Number of valid height pixels
+        
         classified_count = 0
+        height_extracted_count = 0
         
         # Process each footprint
         for idx, footprint in footprints_gdf.iterrows():
             try:
+                # Extract height from DSM if provided
+                if dsm_path:
+                    height_stats = extract_footprint_height(dsm_path, footprint.geometry)
+                    if height_stats:
+                        footprints_gdf.at[idx, 'mean_height'] = height_stats['mean_height']
+                        footprints_gdf.at[idx, 'min_height'] = height_stats['min_height']
+                        footprints_gdf.at[idx, 'max_height'] = height_stats['max_height']
+                        footprints_gdf.at[idx, 'std_height'] = height_stats['std_height']
+                        footprints_gdf.at[idx, 'height_px'] = height_stats['pixel_count']
+                        height_extracted_count += 1
+                
                 # Extract footprint area from orthophoto
                 footprint_image = extract_footprint_image(
                     orthophoto_path, 
@@ -381,6 +528,8 @@ def process_footprints(model, orthophoto_path, footprint_path, confidence_thresh
                 continue
         
         print(f"  Successfully classified {classified_count}/{len(footprints_gdf)} footprints")
+        if dsm_path:
+            print(f"  Successfully extracted height for {height_extracted_count}/{len(footprints_gdf)} footprints")
         
         return footprints_gdf
         
@@ -1027,6 +1176,7 @@ def print_footprint_summary(all_results):
     # Class distribution
     class_counts = {}
     confidences = []
+    heights = []
     
     for result in all_results:
         roof_class = result['roof_class']
@@ -1034,6 +1184,10 @@ def print_footprint_summary(all_results):
         
         class_counts[roof_class] = class_counts.get(roof_class, 0) + 1
         confidences.append(confidence)
+        
+        # Collect height data if available
+        if 'mean_height' in result and not pd.isna(result['mean_height']):
+            heights.append(result['mean_height'])
     
     print(f"\nClass Distribution:")
     for class_name in CLASS_NAMES:
@@ -1048,6 +1202,15 @@ def print_footprint_summary(all_results):
         print(f"  Std:  {np.std(confidences):.3f}")
         print(f"  Min:  {np.min(confidences):.3f}")
         print(f"  Max:  {np.max(confidences):.3f}")
+    
+    if heights:
+        heights = np.array(heights)
+        print(f"\nHeight Statistics (from DSM):")
+        print(f"  Buildings with height data: {len(heights)}/{total_footprints}")
+        print(f"  Mean height: {np.mean(heights):.2f} m")
+        print(f"  Std height:  {np.std(heights):.2f} m")
+        print(f"  Min height:  {np.min(heights):.2f} m")
+        print(f"  Max height:  {np.max(heights):.2f} m")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1057,6 +1220,9 @@ def main():
 Examples:
   # Basic footprint classification (requires footprints/ subdirectory)
   python orthophoto_inference.py --input_dir test_orthophotos/
+  
+  # With DSM for height extraction
+  python orthophoto_inference.py --input_dir test_orthophotos/ --dsm_dir test_dsm/
   
   # With higher confidence threshold
   python orthophoto_inference.py --input_dir test_orthophotos/ --confidence_threshold 0.8
@@ -1074,11 +1240,18 @@ Directory Structure:
   └── footprints/
       ├── orthophoto1_footprints.shp  (or orthophoto1.shp)
       └── orthophoto2_footprints.shp  (or orthophoto2.shp)
+  
+  Optional DSM Structure:
+  test_dsm/
+  ├── orthophoto1_dsm.tif  (or orthophoto1_DSM.tif)
+  └── orthophoto2_dsm.tif
         """
     )
     
     parser.add_argument('--input_dir', required=True,
                        help='Directory containing orthophotos and footprints/ subdirectory')
+    parser.add_argument('--dsm_dir', default=None,
+                       help='Directory containing DSM files for height extraction (optional)')
     parser.add_argument('--model_path', default=None,
                        help='Path to trained model (auto-detect if not specified)')
     parser.add_argument('--confidence_threshold', type=float, default=0.5,
@@ -1096,6 +1269,8 @@ Directory Structure:
     print("FOOTPRINT-BASED ROOF CLASSIFICATION")
     print("="*60)
     print(f"Confidence threshold: {args.confidence_threshold}")
+    if args.dsm_dir:
+        print(f"DSM directory: {args.dsm_dir}")
     
     # Check GIS availability
     if not GIS_AVAILABLE:
@@ -1106,11 +1281,16 @@ Directory Structure:
     # Load model
     model = load_trained_model(args.model_path)
     
-    # Get orthophoto-footprint pairs
+    # Get orthophoto-footprint-DSM triplets
     print(f"\nScanning directory: {args.input_dir}")
+    if args.dsm_dir:
+        print(f"DSM directory: {args.dsm_dir}")
     try:
-        pairs = get_orthophoto_footprint_pairs(args.input_dir)
-        print(f"Found {len(pairs)} orthophoto-footprint pairs")
+        triplets = get_orthophoto_footprint_dsm_triplets(args.input_dir, args.dsm_dir)
+        print(f"Found {len(triplets)} orthophoto-footprint pairs")
+        dsm_count = sum(1 for _, _, dsm in triplets if dsm is not None)
+        if dsm_count > 0:
+            print(f"DSM files available for {dsm_count} orthophotos")
     except Exception as e:
         print(f"❌ Error finding orthophoto-footprint pairs: {e}")
         sys.exit(1)
@@ -1118,15 +1298,15 @@ Directory Structure:
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Process each orthophoto-footprint pair
+    # Process each orthophoto-footprint-DSM triplet
     all_results = []
     
-    for i, (orthophoto_path, footprint_path) in enumerate(pairs, 1):
-        print(f"\n[{i}/{len(pairs)}] " + "="*50)
+    for i, (orthophoto_path, footprint_path, dsm_path) in enumerate(triplets, 1):
+        print(f"\n[{i}/{len(triplets)}] " + "="*50)
         
         # Process footprints for this orthophoto
         classified_footprints = process_footprints(
-            model, orthophoto_path, footprint_path, args.confidence_threshold
+            model, orthophoto_path, footprint_path, args.confidence_threshold, dsm_path
         )
         
         if classified_footprints is not None:
@@ -1150,6 +1330,15 @@ Directory Structure:
                         'roof_class': footprint['roof_class'],
                         'confidence': footprint['confidence']
                     }
+                    
+                    # Add height statistics if available
+                    if dsm_path and not pd.isna(footprint.get('mean_height', np.nan)):
+                        result['mean_height'] = footprint['mean_height']
+                        result['min_height'] = footprint['min_height']
+                        result['max_height'] = footprint['max_height']
+                        result['std_height'] = footprint['std_height']
+                        result['height_pixels'] = footprint['height_px']
+                    
                     # Add class probabilities
                     for class_name in CLASS_NAMES:
                         result[f'prob_{class_name[:8]}'] = footprint[f'prob_{class_name[:8]}']
@@ -1169,12 +1358,14 @@ Directory Structure:
     print("="*60)
     
     print("\nFiles generated:")
-    print(f"  �️  Classified shapefiles: {args.output_dir}/*_classified.shp")
+    print(f"  🏗️  Classified shapefiles: {args.output_dir}/*_classified.shp")
     print(f"  🗺️  GeoJSON files: {args.output_dir}/*_classified.geojson")
     if args.output_csv:
-        print(f"  � CSV results: {csv_path}")
+        print(f"  📊 CSV results: {csv_path}")
     if args.visualize:
         print(f"  📈 Footprint visualizations: {args.output_dir}/*_classified_footprints.png")
+    if args.dsm_dir:
+        print(f"  📏 Height statistics included in outputs")
 
 if __name__ == "__main__":
     main()
