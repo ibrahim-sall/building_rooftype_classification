@@ -276,6 +276,11 @@ def extract_footprint_height(dsm_path, footprint_geometry):
     
     try:
         with rasterio.open(dsm_path) as dsm_src:
+            # Check if DSM is georeferenced
+            if dsm_src.crs is None or dsm_src.transform is None:
+                print(f"    ⚠️  DSM is not georeferenced - cannot extract height for footprint")
+                return None
+            
             # Get the bounds of the footprint
             minx, miny, maxx, maxy = footprint_geometry.bounds
             
@@ -297,18 +302,21 @@ def extract_footprint_height(dsm_path, footprint_geometry):
             # Read the DSM data
             dsm_window = dsm_src.read(1, window=((row_start, row_end), (col_start, col_end)))
             
-            # Remove NoData values
+            # Handle different data types and NoData values
             if dsm_src.nodata is not None:
                 valid_mask = dsm_window != dsm_src.nodata
-                if not np.any(valid_mask):
-                    return None
-                dsm_values = dsm_window[valid_mask]
             else:
-                # Filter out common NoData values and extreme outliers
-                valid_mask = (dsm_window != -9999) & (dsm_window != -32768) & (~np.isnan(dsm_window))
-                if not np.any(valid_mask):
-                    return None
-                dsm_values = dsm_window[valid_mask]
+                # For uint8 data (0-255), all values are typically valid
+                if dsm_src.dtypes[0] == 'uint8':
+                    valid_mask = np.ones_like(dsm_window, dtype=bool)
+                else:
+                    # Filter out common NoData values for other data types
+                    valid_mask = (dsm_window != -9999) & (dsm_window != -32768) & (~np.isnan(dsm_window))
+            
+            if not np.any(valid_mask):
+                return None
+                
+            dsm_values = dsm_window[valid_mask]
             
             # Calculate statistics
             if len(dsm_values) > 0:
@@ -323,6 +331,7 @@ def extract_footprint_height(dsm_path, footprint_geometry):
                 return None
                 
     except Exception as e:
+        print(f"    ⚠️  Error extracting height: {e}")
         return None
 
 def extract_footprint_image(orthophoto_path, footprint_geometry, buffer_pixels=10):
