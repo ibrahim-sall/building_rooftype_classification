@@ -39,7 +39,23 @@ output/
     ├── L-shaped/
     └── pyramid/
 ```
-
+### Orthos
+Directory Structure Expected:
+```
+    input_dir/
+    ├── orthophoto1.tif
+    ├── orthophoto2.tif
+    └── footprints/
+        ├── orthophoto1_footprints.shp
+        ├── orthophoto2_footprints.shp
+        └── ...
+    
+    Optional DSM Structure:
+    dsm_dir/ (or same as input_dir)
+    ├── orthophoto1_dsm.tif
+    ├── orthophoto2_dsm.tif
+    └── ...
+```
 ## Usage
 
 Run the training script:

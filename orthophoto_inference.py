@@ -36,21 +36,6 @@ Features:
 6. **Batch Processing**: Process multiple orthophotos and their corresponding footprints
 7. **Labeled Output**: Creates new shapefiles with roof type classifications and heights
 
-Directory Structure Expected:
-    input_dir/
-    ├── orthophoto1.tif
-    ├── orthophoto2.tif
-    └── footprints/
-        ├── orthophoto1_footprints.shp
-        ├── orthophoto2_footprints.shp
-        └── ...
-    
-    Optional DSM Structure:
-    dsm_dir/ (or same as input_dir)
-    ├── orthophoto1_dsm.tif
-    ├── orthophoto2_dsm.tif
-    └── ...
-
 Usage Examples:
     # Basic footprint classification
     python orthophoto_inference.py --input_dir test_orthophotos/
@@ -66,7 +51,6 @@ Usage Examples:
     
     # Complete output with all options
     python orthophoto_inference.py --input_dir test_orthophotos/ --dsm_dir test_dsm/ --visualize --output_csv results.csv
-
 Supported Image Formats:
     - Standard: .jpg, .jpeg, .png, .bmp, .tiff, .tif, .webp
     - Specialized: .jp2 (JPEG 2000), multi-channel TIFF
@@ -83,32 +67,29 @@ but must also be in the same coordinate system if provided.
 
 import os
 import sys
+import logging
 import argparse
 import numpy as np
 import pandas as pd
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from PIL import Image, ImageDraw, ImageFont
+
+
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.models import load_model
 import cv2
 from skimage.util import view_as_windows
-import warnings
+from PIL import Image, ImageDraw, ImageFont
 
-# GIS libraries for shapefile export
-try:
-    import geopandas as gpd
-    from shapely.geometry import Polygon, box
-    import rasterio
-    from rasterio.windows import from_bounds, Window
-    from rasterio.transform import from_bounds as transform_from_bounds
-    GIS_AVAILABLE = True
-except ImportError:
-    GIS_AVAILABLE = False
-    print("⚠️  GIS libraries not available. Install with: pip install geopandas shapely fiona rasterio")
+import geopandas as gpd
+from shapely.geometry import Polygon, box
+import rasterio
+from rasterio.windows import from_bounds, Window
+from rasterio.transform import from_bounds as transform_from_bounds
 
-warnings.filterwarnings('ignore')
+
 
 # Configuration
 IMG_HEIGHT = 140
@@ -116,15 +97,14 @@ IMG_WIDTH = 140
 CLASS_NAMES = ['complex', 'flat', 'gable', 'halfhip', 'hip', 'L-shaped', 'pyramid']
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.jp2', '.webp', '.gif'}
 
-# Color map for different roof types (BGR format for OpenCV)
 CLASS_COLORS = {
-    'complex': (0, 255, 255),    # Yellow
-    'flat': (255, 0, 0),         # Blue
-    'gable': (0, 255, 0),        # Green
-    'halfhip': (255, 165, 0),    # Orange
-    'hip': (128, 0, 128),        # Purple
-    'L-shaped': (255, 192, 203), # Pink
-    'pyramid': (255, 0, 255)     # Magenta
+    'complex': (0, 255, 255),   
+    'flat': (255, 0, 0),        
+    'gable': (0, 255, 0),       
+    'halfhip': (255, 165, 0),   
+    'hip': (128, 0, 128),       
+    'L-shaped': (255, 192, 203),
+    'pyramid': (255, 0, 255)    
 }
 
 def find_best_model():
@@ -139,7 +119,6 @@ def find_best_model():
         "fine_tuned_vgg16_final_savedmodel"
     ]
     
-    # Check if models directory exists
     if not os.path.exists(models_dir):
         raise FileNotFoundError(f"Models directory '{models_dir}' not found!")
     
@@ -153,22 +132,25 @@ def find_best_model():
         "\n".join([f"  - {models_dir}/{path}" for path in model_candidates])
     )
 
-def load_trained_model(model_path=None):
-    """Load the trained model."""
+def load_trained_model(model_path=None, logger=None):
+    
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    logger.info("Load the trained model.")
     if model_path is None:
         model_path = find_best_model()
     
-    print(f"Loading model from: {model_path}")
+    logger.info(f"Loading model from: {model_path}")
     
     try:
         model = load_model(model_path)
-        print("Model loaded successfully!")
+        logger.info("Model loaded successfully!")
         return model
     except Exception as e:
-        print(f"Error loading model: {e}")
+        logger.error(f"Error loading model: {e}")
         sys.exit(1)
 
-def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None):
+def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None, logger=None):
     """
     Get triplets of orthophotos, their corresponding footprint shapefiles, and DSM files.
     
@@ -179,6 +161,8 @@ def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None):
     Returns:
         List of tuples: (orthophoto_path, footprint_path, dsm_path or None)
     """
+    if logger is None:
+        logger = logging.getLogger(__name__)
     if not os.path.exists(input_dir):
         raise FileNotFoundError(f"Directory not found: {input_dir}")
     
@@ -186,11 +170,10 @@ def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None):
     if not os.path.exists(footprints_dir):
         raise FileNotFoundError(f"Footprints directory not found: {footprints_dir}")
     
-    # Set DSM directory
     if dsm_dir is None:
         dsm_dir = input_dir
     elif not os.path.exists(dsm_dir):
-        print(f"⚠️  DSM directory not found: {dsm_dir}, skipping DSM processing")
+        logger.warning(f"⚠️  DSM directory not found: {dsm_dir}, skipping DSM processing")
         dsm_dir = None
     
     triplets = []
@@ -202,7 +185,6 @@ def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None):
             orthophoto_path = os.path.join(input_dir, filename)
             base_name = os.path.splitext(filename)[0]
             
-            # Look for corresponding footprint shapefile
             possible_footprint_names = [
                 f"{base_name}_footprints.shp",
                 f"{base_name}.shp", 
@@ -217,7 +199,6 @@ def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None):
                     footprint_path = potential_path
                     break
             
-            # Look for corresponding DSM file if DSM directory is available
             dsm_path = None
             if dsm_dir:
                 possible_dsm_names = [
@@ -237,9 +218,9 @@ def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None):
             if footprint_path:
                 triplets.append((orthophoto_path, footprint_path, dsm_path))
                 dsm_status = f" + DSM: {os.path.basename(dsm_path)}" if dsm_path else " (no DSM)"
-                print(f"✅ Found: {filename} -> {os.path.basename(footprint_path)}{dsm_status}")
+                logger.info(f"✅ Found: {filename} -> {os.path.basename(footprint_path)}{dsm_status}")
             else:
-                print(f"⚠️  No footprint shapefile found for {filename}")
+                logger.info(f"⚠️  No footprint shapefile found for {filename}")
     
     if not triplets:
         raise ValueError(f"No orthophoto-footprint pairs found in {input_dir}")
@@ -1377,5 +1358,16 @@ Directory Structure:
     if args.dsm_dir:
         print(f"  📏 Height statistics included in outputs")
 
+
+def setup_logger():
+    """Setup and return a logger instance."""
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    return logging.getLogger(__name__)
+
 if __name__ == "__main__":
+    logger = setup_logger()
     main()
