@@ -50,8 +50,9 @@ def debug_dsm_footprint_alignment(dsm_path, footprint_path):
             valid_data = sample_data[valid_mask]
             
             if len(valid_data) > 0:
-                print(f"  📈 Height range: {np.min(valid_data):.2f} - {np.max(valid_data):.2f}")
-                print(f"  📊 Mean height: {np.mean(valid_data):.2f}")
+                print(f"  📈 Pixel value range: {np.min(valid_data):.2f} - {np.max(valid_data):.2f}")
+                print(f"  📊 Mean pixel value: {np.mean(valid_data):.2f}")
+                print(f"  ⚠️  Note: These are pixel values (0-255), not heights in meters")
             else:
                 print(f"  ⚠️  No valid height data found in sample")
     

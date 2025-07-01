@@ -22,9 +22,9 @@ Optionally, it can also extract height statistics from Digital Surface Models (D
 - Grayscale (converted to RGB)
 
 **DSM SUPPORT**: When DSM files are provided, the script extracts:
-- Mean height of the building footprint
-- Minimum and maximum heights
-- Standard deviation of heights
+- Mean height pixel value of the building footprint (0-255 range, not meters)
+- Minimum and maximum height pixel values
+- Standard deviation of height pixel values
 - Number of valid height pixels
 
 Features:
@@ -478,10 +478,10 @@ def process_footprints(model, orthophoto_path, footprint_path, confidence_thresh
         
         # Add height columns if DSM is provided
         if dsm_path:
-            footprints_gdf['mean_height'] = np.nan
-            footprints_gdf['min_height'] = np.nan
-            footprints_gdf['max_height'] = np.nan
-            footprints_gdf['std_height'] = np.nan
+            footprints_gdf['mean_height'] = np.nan  # DSM pixel values (0-255)
+            footprints_gdf['min_height'] = np.nan   # DSM pixel values (0-255)
+            footprints_gdf['max_height'] = np.nan   # DSM pixel values (0-255)
+            footprints_gdf['std_height'] = np.nan   # DSM pixel values (0-255)
             footprints_gdf['height_px'] = 0  # Number of valid height pixels
         
         classified_count = 0
@@ -1214,12 +1214,13 @@ def print_footprint_summary(all_results):
     
     if heights:
         heights = np.array(heights)
-        print(f"\nHeight Statistics (from DSM):")
+        print(f"\nHeight Statistics (from DSM - pixel values, not meters):")
         print(f"  Buildings with height data: {len(heights)}/{total_footprints}")
-        print(f"  Mean height: {np.mean(heights):.2f} m")
-        print(f"  Std height:  {np.std(heights):.2f} m")
-        print(f"  Min height:  {np.min(heights):.2f} m")
-        print(f"  Max height:  {np.max(heights):.2f} m")
+        print(f"  Mean pixel value: {np.mean(heights):.2f}")
+        print(f"  Std pixel value:  {np.std(heights):.2f}")
+        print(f"  Min pixel value:  {np.min(heights):.2f}")
+        print(f"  Max pixel value:  {np.max(heights):.2f}")
+        print(f"  ⚠️  Note: These are pixel values (0-255), not actual heights in meters")
 
 def main():
     parser = argparse.ArgumentParser(
