@@ -1,6 +1,6 @@
 
 import logging
-
+import os
 import numpy as np
 import pandas as pd
 
@@ -11,6 +11,8 @@ from tensorflow.keras.preprocessing.image import img_to_array
 import geopandas as gpd
 
 import rasterio
+
+from PIL import Image
 
 
 
@@ -31,7 +33,7 @@ def extract_footprint_height(dsm_path, footprint_geometry, logger=None):
         with rasterio.open(dsm_path) as dsm_src:
             
             if dsm_src.crs is None or dsm_src.transform is None:
-                logger.error(f"    ⚠️  DSM is not georeferenced - cannot extract height for footprint")
+                logger.error(f"DSM is not georeferenced - cannot extract height for footprint")
                 return None
             
             minx, miny, maxx, maxy = footprint_geometry.bounds
@@ -140,7 +142,7 @@ def extract_footprint_image(orthophoto_path, footprint_geometry, buffer_pixels=1
         logger.error(f"Error extracting footprint from {os.path.basename(orthophoto_path)}: {e}")
         return None
 
-def classify_footprint_image(model, footprint_image, logger=None):
+def classify_footprint_image(model, footprint_image, IMG_WIDTH, IMG_HEIGHT, CLASS_NAMES, logger=None):
     """
     Classify a single footprint image using the trained model.
     
@@ -176,10 +178,11 @@ def classify_footprint_image(model, footprint_image, logger=None):
         }
         
     except Exception as e:
-        print(f"❌ Error classifying footprint: {e}")
+        print(f"Error classifying footprint: {e}")
         return None
 
-def process_footprints(model, orthophoto_path, footprint_path, confidence_threshold=0.5, dsm_path=None):
+def process_footprints(model, orthophoto_path, footprint_path, CLASS_NAMES, IMG_WIDTH, IMG_HEIGHT,
+                       confidence_threshold, dsm_path=None, logger=None):
     """
     Process building footprints by classifying roof types from orthophoto.
     
@@ -193,19 +196,18 @@ def process_footprints(model, orthophoto_path, footprint_path, confidence_thresh
     Returns:
         GeoDataFrame with classified footprints
     """
-    if not GIS_AVAILABLE:
-        print("❌ GIS libraries required for footprint processing")
-        return None
-    
-    print(f"Processing footprints from: {os.path.basename(footprint_path)}")
-    print(f"Using orthophoto: {os.path.basename(orthophoto_path)}")
+    if logger is None:
+        logger = logging.getLogger(__name__)
+        
+    logger.info(f"Processing footprints from: {os.path.basename(footprint_path)}")
+    logger.info(f"Using orthophoto: {os.path.basename(orthophoto_path)}")
     if dsm_path:
-        print(f"Using DSM: {os.path.basename(dsm_path)}")
+        logger.info(f"Using DSM: {os.path.basename(dsm_path)}")
     
     try:
         # Load footprints shapefile
         footprints_gdf = gpd.read_file(footprint_path)
-        print(f"  Loaded {len(footprints_gdf)} footprints")
+        logger.info(f"  Loaded {len(footprints_gdf)} footprints")
         
         # Initialize classification columns
         footprints_gdf['roof_class'] = 'unknown'
@@ -252,7 +254,7 @@ def process_footprints(model, orthophoto_path, footprint_path, confidence_thresh
                     continue
                 
                 # Classify the footprint
-                classification = classify_footprint_image(model, footprint_image)
+                classification = classify_footprint_image(model, footprint_image, IMG_WIDTH=224, IMG_HEIGHT=224, CLASS_NAMES=CLASS_NAMES, logger=logging.getLogger(__name__))
                 
                 if classification is None:
                     continue
@@ -270,20 +272,20 @@ def process_footprints(model, orthophoto_path, footprint_path, confidence_thresh
                     classified_count += 1
                     
                     if classified_count % 10 == 0:
-                        print(f"    Classified {classified_count} footprints...")
+                        logger.info(f"    Classified {classified_count} footprints...")
                 
             except Exception as e:
-                print(f"    ⚠️  Error processing footprint {idx}: {e}")
+                logger.error(f"Error processing footprint {idx}: {e}")
                 continue
         
-        print(f"  Successfully classified {classified_count}/{len(footprints_gdf)} footprints")
+        logger.info(f"  Successfully classified {classified_count}/{len(footprints_gdf)} footprints")
         if dsm_path:
-            print(f"  Successfully extracted height for {height_extracted_count}/{len(footprints_gdf)} footprints")
+            logger.info(f"  Successfully extracted height for {height_extracted_count}/{len(footprints_gdf)} footprints")
         
         return footprints_gdf
         
     except Exception as e:
-        print(f"❌ Error processing footprints: {e}")
+        logger.error(f"Error processing footprints: {e}")
         return None
 
 
@@ -298,7 +300,7 @@ def pixel_to_geographic(x, y, transform):
 
 
 
-def print_footprint_summary(all_results):
+def print_footprint_summary(all_results, CLASS_NAMES):
     """Print summary statistics for footprint classifications."""
     if not all_results:
         print("\n" + "="*60)

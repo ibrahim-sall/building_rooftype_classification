@@ -167,29 +167,29 @@ Directory Structure:
     
     args = parser.parse_args()
     
-    print("="*60)
-    print("FOOTPRINT-BASED ROOF CLASSIFICATION")
-    print("="*60)
-    print(f"Confidence threshold: {args.confidence_threshold}")
+    logger.info("="*60)
+    logger.info("FOOTPRINT-BASED ROOF CLASSIFICATION")
+    logger.info("="*60)
+    logger.info(f"Confidence threshold: {args.confidence_threshold}")
     if args.dsm_dir:
-        print(f"DSM directory: {args.dsm_dir}")
+        logger.info(f"DSM directory: {args.dsm_dir}")
     
     
     # Load model
     model = load_trained_model(args.model_path)
     
     # Get orthophoto-footprint-DSM triplets
-    print(f"\nScanning directory: {args.input_dir}")
+    logger.info(f"\nScanning directory: {args.input_dir}")
     if args.dsm_dir:
-        print(f"DSM directory: {args.dsm_dir}")
+        logger.info(f"DSM directory: {args.dsm_dir}")
     try:
         triplets = get_orthophoto_footprint_dsm_triplets(args.input_dir, args.dsm_dir)
-        print(f"Found {len(triplets)} orthophoto-footprint pairs")
+        logger.info(f"Found {len(triplets)} orthophoto-footprint pairs")
         dsm_count = sum(1 for _, _, dsm in triplets if dsm is not None)
         if dsm_count > 0:
-            print(f"DSM files available for {dsm_count} orthophotos")
+            logger.info(f"DSM files available for {dsm_count} orthophotos")
     except Exception as e:
-        print(f"❌ Error finding orthophoto-footprint pairs: {e}")
+        logger.error(f"Error finding orthophoto-footprint pairs: {e}")
         sys.exit(1)
     
     # Create output directory
@@ -199,11 +199,14 @@ Directory Structure:
     all_results = []
     
     for i, (orthophoto_path, footprint_path, dsm_path) in enumerate(triplets, 1):
-        print(f"\n[{i}/{len(triplets)}] " + "="*50)
+        logger.info(f"\n[{i}/{len(triplets)}] " + "="*50)
         
         # Process footprints for this orthophoto
         classified_footprints = process_footprints(
-            model, orthophoto_path, footprint_path, args.confidence_threshold, dsm_path
+            model, orthophoto_path, footprint_path, CLASS_NAMES, IMG_HEIGHT, IMG_WIDTH,
+            confidence_threshold=args.confidence_threshold,
+            dsm_path=dsm_path,
+            logger=logger
         )
         
         if classified_footprints is not None:
@@ -212,13 +215,11 @@ Directory Structure:
             output_shapefile = os.path.join(args.output_dir, f"{base_name}_classified.shp")
             save_classified_footprints(classified_footprints, output_shapefile)
             
-            # Create visualization if requested
             if args.visualize:
                 viz_filename = f"{base_name}_classified_footprints.png"
                 viz_path = os.path.join(args.output_dir, viz_filename)
                 create_footprint_visualization(orthophoto_path, classified_footprints, viz_path)
             
-            # Collect results for CSV export
             for idx, footprint in classified_footprints.iterrows():
                 if footprint['classified']:
                     result = {
@@ -228,7 +229,6 @@ Directory Structure:
                         'confidence': footprint['confidence']
                     }
                     
-                    # Add height statistics if available
                     if dsm_path and not pd.isna(footprint.get('mean_height', np.nan)):
                         result['mean_height'] = footprint['mean_height']
                         result['min_height'] = footprint['min_height']
@@ -236,33 +236,30 @@ Directory Structure:
                         result['std_height'] = footprint['std_height']
                         result['height_pixels'] = footprint['height_px']
                     
-                    # Add class probabilities
                     for class_name in CLASS_NAMES:
                         result[f'prob_{class_name[:8]}'] = footprint[f'prob_{class_name[:8]}']
                     
                     all_results.append(result)
-    
-    # Save CSV results if requested
+
     if args.output_csv and all_results:
         csv_path = args.output_csv if os.path.dirname(args.output_csv) else os.path.join(args.output_dir, args.output_csv)
         save_footprint_results_to_csv(all_results, csv_path)
     
-    # Print summary
-    print_footprint_summary(all_results)
+    print_footprint_summary(all_results, CLASS_NAMES)
     
-    print(f"\n" + "="*60)
-    print("PROCESSING COMPLETED")
-    print("="*60)
+    logger.info(f"\n" + "="*60)
+    logger.info("PROCESSING COMPLETED")
+    logger.info("="*60)
     
-    print("\nFiles generated:")
-    print(f"  🏗️  Classified shapefiles: {args.output_dir}/*_classified.shp")
-    print(f"  🗺️  GeoJSON files: {args.output_dir}/*_classified.geojson")
+    logger.info("\nFiles generated:")
+    logger.info(f"Classified shapefiles: {args.output_dir}/*_classified.shp")
+    logger.info(f"GeoJSON files: {args.output_dir}/*_classified.geojson")
     if args.output_csv:
-        print(f"  📊 CSV results: {csv_path}")
+        logger.info(f"CSV results: {csv_path}")
     if args.visualize:
-        print(f"  📈 Footprint visualizations: {args.output_dir}/*_classified_footprints.png")
+        logger.info(f"Footprint visualizations: {args.output_dir}/*_classified_footprints.png")
     if args.dsm_dir:
-        print(f"  📏 Height statistics included in outputs")
+        logger.info(f"Height statistics included in outputs")
 
 
 if __name__ == "__main__":
