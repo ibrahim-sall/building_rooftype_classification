@@ -78,7 +78,7 @@ def evaluate_model(model, val_generator, config, logger):
     for i, class_name in enumerate(config.CLASS_NAMES):
         logger.info(f"{class_name:12}: {per_class_accuracy[i]:.4f} ({per_class_accuracy[i]*100:.2f}%)")
     
-    logger.info("✅ Model evaluation completed")
+    logger.info("Model evaluation completed")
     return test_accuracy, test_loss
 
 def save_model(model, config, combined_history, logger):
@@ -120,7 +120,7 @@ def save_model(model, config, combined_history, logger):
             pickle.dump(combined_history, f)
         logger.info(f"Training history saved as {history_path}")
     
-    logger.info("✅ Model saving completed")
+    logger.info("Model saving completed")
 
 
 def build_fine_tuned_vgg16(config, logger):
@@ -191,7 +191,7 @@ def load_or_create_model(config, logger):
         if config.FORCE_RETRAIN and os.path.exists(model_path):
             logger.info("🔄 FORCE_RETRAIN is enabled - will overwrite existing model")
         else:
-            logger.info(f"📝 No existing model found at {model_path}")
+            logger.info(f"No existing model found at {model_path}")
         
         logger.info("Creating new model for training...")
         model, vgg16_base = build_fine_tuned_vgg16(config, logger)

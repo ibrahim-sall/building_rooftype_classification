@@ -11,20 +11,19 @@ import rasterio
 
 
 
-def create_footprint_visualization(orthophoto_path, classified_footprints, output_path):
+def create_footprint_visualization(orthophoto_path, classified_footprints, output_path, logger=None):
     """Create visualization of classified footprints overlaid on orthophoto."""
+    if logger is None:
+        logger = logging.getLogger(__name__)
     try:
-        # Load orthophoto
+
         with rasterio.open(orthophoto_path) as src:
-            # Read RGB bands
             if src.count >= 3:
                 rgb_data = src.read([1, 2, 3])
             else:
-                # Grayscale - convert to RGB
                 gray_data = src.read(1)
                 rgb_data = np.stack([gray_data] * 3, axis=0)
             
-            # Convert to HWC format
             rgb_image = np.transpose(rgb_data, (1, 2, 0))
             
             # Normalize to 0-255 if needed
@@ -34,11 +33,9 @@ def create_footprint_visualization(orthophoto_path, classified_footprints, outpu
                 else:
                     rgb_image = rgb_image.astype(np.uint8)
         
-        # Create visualization
         plt.figure(figsize=(16, 12))
         plt.imshow(rgb_image)
         
-        # Define colors for each class
         class_colors = {
             'complex': 'red',
             'flat': 'blue', 
@@ -62,7 +59,6 @@ def create_footprint_visualization(orthophoto_path, classified_footprints, outpu
                     if geom.is_empty:
                         continue
                     
-                    # Get exterior coordinates
                     if hasattr(geom, 'exterior'):
                         coords = list(geom.exterior.coords)
                     else:
@@ -76,7 +72,6 @@ def create_footprint_visualization(orthophoto_path, classified_footprints, outpu
                     
                     pixel_coords = np.array(pixel_coords)
                     
-                    # Determine color and style
                     if footprint['classified']:
                         color = class_colors.get(footprint['roof_class'], 'gray')
                         alpha = min(0.3 + footprint['confidence'] * 0.4, 0.8)
@@ -98,7 +93,7 @@ def create_footprint_visualization(orthophoto_path, classified_footprints, outpu
                 except Exception as e:
                     continue
         
-        # Add legend
+
         legend_elements = []
         from matplotlib.lines import Line2D
         for class_name, color in class_colors.items():
@@ -119,9 +114,9 @@ def create_footprint_visualization(orthophoto_path, classified_footprints, outpu
                    facecolor='white', edgecolor='none')
         plt.close()
         
-        print(f"📈 Footprint visualization saved: {output_path}")
+        logger.info(f"Footprint visualization saved: {output_path}")
         
     except Exception as e:
-        print(f"❌ Error creating footprint visualization: {e}")
+        logger.error(f"Error creating footprint visualization: {e}")
         import traceback
         traceback.print_exc()
