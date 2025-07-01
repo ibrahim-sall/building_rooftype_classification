@@ -48,7 +48,7 @@ def load_trained_model(model_path=None, logger=None):
         logger.error(f"Error loading model: {e}")
         sys.exit(1)
 
-def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None, logger=None):
+def get_orthophoto_footprint_dsm_triplets(input_dir, SUPPORTED_FORMATS, dsm_dir=None, logger=None):
     """
     Get triplets of orthophotos, their corresponding footprint shapefiles, and DSM files.
     
@@ -125,45 +125,29 @@ def get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None, logger=None):
     
     return triplets
 
-def get_orthophoto_footprint_pairs(input_dir):
-    """
-    Get pairs of orthophotos and their corresponding footprint shapefiles.
-    
-    Args:
-        input_dir: Directory containing orthophotos and footprints subdirectory
-    
-    Returns:
-        List of tuples: (orthophoto_path, footprint_path)
-    """
-    # Use the new triplet function but only return pairs (ignore DSM)
-    triplets = get_orthophoto_footprint_dsm_triplets(input_dir, dsm_dir=None)
-    return [(ortho, footprint) for ortho, footprint, _ in triplets]
-
-
-def save_classified_footprints(footprints_gdf, output_path):
+def save_classified_footprints(footprints_gdf, output_path, logger=None):
     """Save classified footprints to shapefile."""
+    if logger is None:
+        logger = logging.getLogger(__name__)
     if footprints_gdf is None or len(footprints_gdf) == 0:
-        print("⚠️  No footprints to save")
+        logger.error("No footprints to save")
         return
     
     try:
-        # Save to shapefile
         footprints_gdf.to_file(output_path, driver='ESRI Shapefile')
-        print(f"🗺️  Classified footprints saved: {output_path}")
+        logger.info(f"Classified footprints saved: {output_path}")
         
-        # Also save as GeoJSON
         geojson_path = output_path.replace('.shp', '.geojson')
         footprints_gdf.to_file(geojson_path, driver='GeoJSON')
-        print(f"🗺️  GeoJSON saved: {geojson_path}")
+        logger.info(f"GeoJSON saved: {geojson_path}")
         
-        # Print classification summary
         classified_footprints = footprints_gdf[footprints_gdf['classified'] == True]
         if len(classified_footprints) > 0:
-            print(f"📊 Classification summary:")
+            logger.info(f"Classification summary:")
             class_counts = classified_footprints['roof_class'].value_counts()
             for class_name, count in class_counts.items():
                 percentage = (count / len(classified_footprints)) * 100
-                print(f"    {class_name}: {count} ({percentage:.1f}%)")
+                logger.info(f"    {class_name}: {count} ({percentage:.1f}%)")
         
     except Exception as e:
-        print(f"❌ Error saving classified footprints: {e}")
+        logger.error(f"Error saving classified footprints: {e}")

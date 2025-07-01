@@ -183,7 +183,7 @@ Directory Structure:
     if args.dsm_dir:
         logger.info(f"DSM directory: {args.dsm_dir}")
     try:
-        triplets = get_orthophoto_footprint_dsm_triplets(args.input_dir, args.dsm_dir)
+        triplets = get_orthophoto_footprint_dsm_triplets(args.input_dir, SUPPORTED_FORMATS, args.dsm_dir)
         logger.info(f"Found {len(triplets)} orthophoto-footprint pairs")
         dsm_count = sum(1 for _, _, dsm in triplets if dsm is not None)
         if dsm_count > 0:
