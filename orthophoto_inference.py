@@ -83,7 +83,7 @@ from utils.footprints import *
 
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import img_to_array
-from tensorflow.keras.models import load_model
+
 import cv2
 from skimage.util import view_as_windows
 from PIL import Image, ImageDraw, ImageFont
