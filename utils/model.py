@@ -5,7 +5,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report
 
-
+import tensorflow as tf
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.applications import VGG16
+from tensorflow.keras import layers, Model
 
 def evaluate_model(model, val_generator, config, logger):
     """Evaluate the model and generate reports."""
@@ -119,6 +122,35 @@ def save_model(model, config, combined_history, logger):
     
     logger.info("✅ Model saving completed")
 
+
+def build_fine_tuned_vgg16(config, logger):
+    """Build and return the fine-tuned VGG16 model."""
+    logger.info("Building VGG16 model...")
+    
+    # Load pre-trained VGG16 model
+    vgg16_base = VGG16(
+        weights='imagenet',
+        include_top=False,
+        input_shape=(config.IMG_HEIGHT, config.IMG_WIDTH, 3)
+    )
+    
+    vgg16_base.trainable = False
+    
+    inputs = vgg16_base.input
+    x = vgg16_base.output
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dense(512, activation='relu')(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Dense(256, activation='relu')(x)
+    x = layers.Dropout(0.3)(x)
+    x = layers.Dense(128, activation='relu')(x)
+    x = layers.Dropout(0.2)(x)
+    outputs = layers.Dense(config.NUM_CLASSES, activation='softmax')(x)
+    
+    model = Model(inputs, outputs)
+    logger.info("Model built successfully")
+    
+    return model, vgg16_base
 
 
 def load_or_create_model(config, logger):
