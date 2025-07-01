@@ -1,299 +1,152 @@
+#!/usr/bin/env python3
 """
-Fine-Tuned VGG16 Model Training Script with Model Reloading
-===========================================================
+Fine-Tuned VGG16 Model Training Script - Refactored Version
+==========================================================
 
 This script implements a comprehensive training pipeline for building roof type classification
-using a Fine-Tuned VGG16 model with the following features:
+using a Fine-Tuned VGG16 model with proper function structure and logging.
 
-1. **Smart Model Loading**: 
-   - Automatically detects if a trained model exists
-   - Loads existing model and skips training (configurable)
-   - Supports force retraining with FORCE_RETRAIN flag
-   - Supports continue training with CONTINUE_TRAINING flag
+Features:
+1. **Smart Model Loading**: Automatically detects and loads existing models
+2. **Configuration Options**: Easy configuration through constants
+3. **Two-Phase Training**: Frozen → fine-tuned training approach
+4. **Continue Training**: Additional training from existing models
+5. **Comprehensive Evaluation**: Confusion matrix and classification reports
+6. **Multiple Save Formats**: .keras, .h5, SavedModel, weights
+7. **Proper Logging**: Structured logging throughout the process
 
-2. **Configuration Options**:
-   - FORCE_RETRAIN: Set to True to retrain even if model exists
-   - AUTO_SKIP_IF_EXISTS: Set to False for manual control
-   - CONTINUE_TRAINING: Set to True to continue training from existing model
-   - ADDITIONAL_EPOCHS: Number of additional epochs when continuing training
-
-3. **Training Modes**:
-   - **Fresh Training**: Two-phase training (frozen → fine-tuned)
-   - **Continue Training**: Additional training from existing model with very low learning rate
-   - **Skip Training**: Load model and proceed directly to evaluation
-
-4. **Two-Phase Training** (Fresh):
-   - Phase 1: Train custom classifier with frozen VGG16 base
-   - Phase 2: Fine-tune top VGG16 layers with lower learning rate
-
-5. **Continue Training** (Existing model):
-   - Phase 3: Additional training with very low learning rate (0.00001)
-   - Preserves existing knowledge while allowing incremental improvements
-
-6. **Comprehensive Evaluation**:
-   - Normalized confusion matrix
-   - Classification report
-   - Per-class accuracy breakdown
-
-7. **Multiple Save Formats**:
-   - .keras (recommended)
-   - .h5 (legacy)
-   - SavedModel (deployment)
-   - Weights only
-   - Training history
-
-Usage Examples:
-    # Fresh training (if no model exists)
+Usage:
     python train.py
-    
-    # Continue training from existing model for 10 more epochs
-    CONTINUE_TRAINING = True
-    ADDITIONAL_EPOCHS = 10
-    python train.py
-    
-    # Force retrain (overwrite existing model)
-    FORCE_RETRAIN = True
-    python train.py
-    
-    # Just evaluate existing model
-    AUTO_SKIP_IF_EXISTS = True  # (default)
-    python train.py
-
-The script will automatically:
-- Load existing model if found (fine_tuned_vgg16_final.h5)
-- Skip training and proceed to evaluation (default)
-- Continue training if CONTINUE_TRAINING=True
-- Or retrain if FORCE_RETRAIN=True
 """
 
-# Fine-Tuned VGG16 Model Training with Normalized Confusion Matrix
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import classification_report, confusion_matrix
+
 from tensorflow.keras.applications import VGG16
 from tensorflow.keras import Model
 from tensorflow.keras import layers
-from tensorflow.keras.optimizers import Adam, SGD
+from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import CSVLogger, EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 import tensorflow as tf
+
 import seaborn as sns
 import os
+import logging
 import pickle
-import warnings
-warnings.filterwarnings('ignore')
 
-# Set random seeds for reproducibility
-np.random.seed(42)
-tf.random.set_seed(42)
+from utils.model import *
 
 # ============================================================================
-# TRAINING CONFIGURATION - Modify these settings as needed
-# ============================================================================
-
-# Model behavior settings
-FORCE_RETRAIN = False        # True = Always retrain from scratch
-AUTO_SKIP_IF_EXISTS = True   # True = Auto-skip training if model exists  
-CONTINUE_TRAINING = True   # True = Continue training from existing model
-ADDITIONAL_EPOCHS = 30      # Number of additional epochs for continue training
-
-# Training parameters
-CONTINUE_LEARNING_RATE = 0.0001   # Moderate learning rate for continue training (10x higher)
-FRESH_LEARNING_RATE = 0.001       # Standard learning rate for fresh training
-FINE_TUNE_LEARNING_RATE = 0.00001 # Learning rate for fine-tuning phase
-
-# Alternative learning rates (uncomment to use):
-# CONTINUE_LEARNING_RATE = 0.00001  # Very conservative (original)
-# CONTINUE_LEARNING_RATE = 0.0005   # More aggressive for significant improvements
-# CONTINUE_LEARNING_RATE = 0.00005  # Slightly more aggressive than original
-
-# ============================================================================
-# END OF CONFIGURATION SECTION
-# ============================================================================
-
-# Configuration
-num_classes = 7
-batch_size = 64
-img_height = 140
-img_width = 140
-class_names = ['complex', 'flat', 'gable', 'halfhip', 'hip', 'L-shaped', 'pyramid']
-
-# Data directories
-train_dir = 'output/train'
-val_dir = 'output/val'
-
-print("Starting Fine-Tuned VGG16 Training...")
-print(f"Number of classes: {num_classes}")
-print(f"Image size: {img_height}x{img_width}")
-print(f"Batch size: {batch_size}")
-
-# Check if data directories exist
-if not os.path.exists(train_dir):
-    raise FileNotFoundError(f"Training directory '{train_dir}' not found!")
-if not os.path.exists(val_dir):
-    raise FileNotFoundError(f"Validation directory '{val_dir}' not found!")
-
-# Data loading and preprocessing
-print("\n" + "="*50)
-print("LOADING AND PREPROCESSING DATA")
-print("="*50)
-
-# Create data generators with augmentation for training
-train_datagen = ImageDataGenerator(
-    rescale=1./255,
-    rotation_range=20,
-    width_shift_range=0.2,
-    height_shift_range=0.2,
-    shear_range=0.2,
-    zoom_range=0.2,
-    horizontal_flip=True,
-    fill_mode='nearest'
-)
-
-# Validation data generator (only rescaling)
-val_datagen = ImageDataGenerator(rescale=1./255)
-
-# Load training data
-train_generator = train_datagen.flow_from_directory(
-    train_dir,
-    target_size=(img_height, img_width),
-    batch_size=batch_size,
-    class_mode='categorical',
-    shuffle=True,
-    seed=42
-)
-
-# Load validation data
-val_generator = val_datagen.flow_from_directory(
-    val_dir,
-    target_size=(img_height, img_width),
-    batch_size=batch_size,
-    class_mode='categorical',
-    shuffle=False,
-    seed=42
-)
-
-# We'll use the generators directly instead of converting to tf.data.Dataset
-# This is more compatible and easier to work with
-
-print(f"Training samples: {train_generator.samples}")
-print(f"Validation samples: {val_generator.samples}")
-print(f"Classes found: {list(train_generator.class_indices.keys())}")
-
-# Load pre-trained VGG16 model
-vgg16_base = VGG16(
-    weights='imagenet',
-    include_top=False,
-    input_shape=(img_height, img_width, 3)
-)
-
-# Freeze base model initially
-vgg16_base.trainable = False
-
-# Build custom classifier on top
-def build_fine_tuned_vgg16():
-    inputs = vgg16_base.input
-    x = vgg16_base.output
-    x = layers.GlobalAveragePooling2D()(x)
-    x = layers.Dense(512, activation='relu')(x)
-    x = layers.Dropout(0.5)(x)
-    x = layers.Dense(256, activation='relu')(x)
-    x = layers.Dropout(0.3)(x)
-    x = layers.Dense(128, activation='relu')(x)
-    x = layers.Dropout(0.2)(x)
-    outputs = layers.Dense(num_classes, activation='softmax')(x)
-    
-    return Model(inputs, outputs)
-
-# Create model or load existing one
-models_dir = "models"
-model_path = os.path.join(models_dir, "fine_tuned_vgg16_final.wheight.h5")
-skip_training = False
-
-# Ensure models directory exists
-os.makedirs(models_dir, exist_ok=True)
-
-if os.path.exists(model_path) and not FORCE_RETRAIN:
-    print(f"\n{'='*50}")
-    print("EXISTING MODEL FOUND")
-    print("="*50)
-    try:
-        fine_tuned_vgg16 = tf.keras.models.load_model(model_path)
-        print(f"✅ Successfully loaded existing model: {model_path}")
-        
-        if CONTINUE_TRAINING:
-            skip_training = False
-            print(f"🔄 CONTINUE_TRAINING enabled - will train for {ADDITIONAL_EPOCHS} more epochs...")
-        elif AUTO_SKIP_IF_EXISTS:
-            skip_training = True
-            print("⏭️  Auto-skipping training - proceeding to evaluation...")
-        else:
-            print("\nWhat would you like to do?")
-            print("1. Skip training and evaluate existing model")
-            print("2. Continue training from loaded model")
-            print("3. Start fresh training (overwrite existing model)")
-            
-            # For automated execution, default to evaluation
-            choice = "1"  # You can modify this or add input() for interactive mode
-            
-            if choice == "1":
-                skip_training = True
-                print("⏭️  Skipping training - proceeding to evaluation...")
-            elif choice == "2":
-                skip_training = False
-                print("🔄 Continuing training from loaded model...")
-            else:
-                skip_training = False
-                print("🆕 Starting fresh training...")
-                fine_tuned_vgg16 = build_fine_tuned_vgg16()
-                
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
-        print("Creating new model instead...")
-        fine_tuned_vgg16 = build_fine_tuned_vgg16()
-        skip_training = False
-        
-        # Compile model for training
-        fine_tuned_vgg16.compile(
-            optimizer=Adam(learning_rate=FRESH_LEARNING_RATE),
-            loss='categorical_crossentropy',
-            metrics=['accuracy']
-        )
-else:
-    if FORCE_RETRAIN and os.path.exists(model_path):
-        print(f"\n🔄 FORCE_RETRAIN is enabled - will overwrite existing model")
-    else:
-        print(f"\n📝 No existing model found at {model_path}")
-    
-    print("Creating new model for training...")
-    fine_tuned_vgg16 = build_fine_tuned_vgg16()
-    skip_training = False
-    
-    # Compile model for initial training
-    fine_tuned_vgg16.compile(
-        optimizer=Adam(learning_rate=FRESH_LEARNING_RATE),
-        loss='categorical_crossentropy',
-        metrics=['accuracy']
+def setup_logger():
+    """Setup and return a logger instance."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
     )
+    return logging.getLogger(__name__)
 
-print("\nModel Architecture:")
-fine_tuned_vgg16.summary()
+# ============================================================================
+# TRAINING CONFIGURATION
+# ============================================================================
 
-if not skip_training:
-    print(f"\nPhase 1 - Frozen VGG16 base:")
-    print(f"Total params: {fine_tuned_vgg16.count_params():,}")
-    print(f"Trainable params: {sum([tf.keras.backend.count_params(w) for w in fine_tuned_vgg16.trainable_weights]):,}")
-    print(f"Non-trainable params: {sum([tf.keras.backend.count_params(w) for w in fine_tuned_vgg16.non_trainable_weights]):,}")
-else:
-    print(f"\n📊 Loaded Model Info:")
-    print(f"Total params: {fine_tuned_vgg16.count_params():,}")
-    print(f"Trainable params: {sum([tf.keras.backend.count_params(w) for w in fine_tuned_vgg16.trainable_weights]):,}")
-    print(f"Non-trainable params: {sum([tf.keras.backend.count_params(w) for w in fine_tuned_vgg16.non_trainable_weights]):,}")
+class Config:
+    # Model behavior settings
+    FORCE_RETRAIN = False
+    AUTO_SKIP_IF_EXISTS = True
+    CONTINUE_TRAINING = False
+    ADDITIONAL_EPOCHS = 30
+    
+    # Training parameters
+    CONTINUE_LEARNING_RATE = 0.0001
+    FRESH_LEARNING_RATE = 0.001
+    FINE_TUNE_LEARNING_RATE = 0.00001
+    
+    # Model parameters
+    NUM_CLASSES = 7
+    BATCH_SIZE = 64
+    IMG_HEIGHT = 140
+    IMG_WIDTH = 140
+    CLASS_NAMES = ['complex', 'flat', 'gable', 'halfhip', 'hip', 'L-shaped', 'pyramid']
+    
+    # Directories
+    TRAIN_DIR = 'output/train'
+    VAL_DIR = 'output/val'
+    MODELS_DIR = 'models'
+    
+    # Training phases
+    EPOCHS_PHASE1 = 20
+    EPOCHS_PHASE2 = 30
+    FINE_TUNE_AT = 15
 
-# Setup callbacks (only if training)
-if not skip_training:
+def check_directories(config, logger):
+    """Check if required directories exist."""
+    logger.info("Checking data directories...")
+    
+    if not os.path.exists(config.TRAIN_DIR):
+        raise FileNotFoundError(f"Training directory '{config.TRAIN_DIR}' not found!")
+    if not os.path.exists(config.VAL_DIR):
+        raise FileNotFoundError(f"Validation directory '{config.VAL_DIR}' not found!")
+    
+    # Create models directory if it doesn't exist
+    os.makedirs(config.MODELS_DIR, exist_ok=True)
+    
+    logger.info("All directories found/created")
+
+def create_data_generators(config, logger):
+    """Create and return training and validation data generators."""
+    logger.info("Creating data generators...")
+    
+    # Create data generators with augmentation for training
+    train_datagen = ImageDataGenerator(
+        rescale=1./255,
+        rotation_range=20,
+        width_shift_range=0.2,
+        height_shift_range=0.2,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True,
+        fill_mode='nearest'
+    )
+    
+    # Validation data generator (only rescaling)
+    val_datagen = ImageDataGenerator(rescale=1./255)
+    
+    # Load training data
+    train_generator = train_datagen.flow_from_directory(
+        config.TRAIN_DIR,
+        target_size=(config.IMG_HEIGHT, config.IMG_WIDTH),
+        batch_size=config.BATCH_SIZE,
+        class_mode='categorical',
+        shuffle=True,
+        seed=42
+    )
+    
+    # Load validation data
+    val_generator = val_datagen.flow_from_directory(
+        config.VAL_DIR,
+        target_size=(config.IMG_HEIGHT, config.IMG_WIDTH),
+        batch_size=config.BATCH_SIZE,
+        class_mode='categorical',
+        shuffle=False,
+        seed=42
+    )
+    
+    logger.info(f"Training samples: {train_generator.samples}")
+    logger.info(f"Validation samples: {val_generator.samples}")
+    logger.info(f"Classes found: {list(train_generator.class_indices.keys())}")
+    
+    return train_generator, val_generator
+
+
+def create_callbacks(config, logger):
+    """Create and return training callbacks."""
+    logger.info("Setting up training callbacks...")
+    
     callbacks = [
-        CSVLogger(os.path.join(models_dir, 'fine_tuned_vgg16_training.log'), separator=','),
+        CSVLogger(os.path.join(config.MODELS_DIR, 'fine_tuned_vgg16_training.log'), separator=','),
         EarlyStopping(
             monitor='val_accuracy',
             patience=10,
@@ -301,7 +154,7 @@ if not skip_training:
             verbose=1
         ),
         ModelCheckpoint(
-            os.path.join(models_dir, 'best_fine_tuned_vgg16.h5'),
+            os.path.join(config.MODELS_DIR, 'best_fine_tuned_vgg16.keras'),
             monitor='val_accuracy',
             mode='max',
             save_best_only=True,
@@ -315,336 +168,234 @@ if not skip_training:
             verbose=1
         )
     ]
+    
+    return callbacks
 
-# Phase 1: Train with frozen base (only if not skipping training)
-if not skip_training:
-    # Check if this is continue training or fresh training
-    if CONTINUE_TRAINING and os.path.exists(model_path):
-        print("\n" + "="*50)
-        print("PHASE 3: CONTINUE TRAINING FROM EXISTING MODEL")
-        print("="*50)
-        
-        # Calculate steps per epoch based on actual data
-        steps_per_epoch = train_generator.samples // batch_size
-        validation_steps = val_generator.samples // batch_size
-        
-        print(f"Steps per epoch: {steps_per_epoch}")
-        print(f"Validation steps: {validation_steps}")
-        print(f"Additional epochs: {ADDITIONAL_EPOCHS}")
-        
-        # Use a very low learning rate for continued training
-        fine_tuned_vgg16.compile(
-            optimizer=Adam(learning_rate=CONTINUE_LEARNING_RATE),
-            loss='categorical_crossentropy',
-            metrics=['accuracy']
-        )
-        
-        print("\n📊 Current Model State:")
-        print(f"Total params: {fine_tuned_vgg16.count_params():,}")
-        print(f"Trainable params: {sum([tf.keras.backend.count_params(w) for w in fine_tuned_vgg16.trainable_weights]):,}")
-        print(f"Non-trainable params: {sum([tf.keras.backend.count_params(w) for w in fine_tuned_vgg16.non_trainable_weights]):,}")
-        
-        # Continue training with additional epochs
-        history_continue = fine_tuned_vgg16.fit(
-            train_generator,
-            steps_per_epoch=steps_per_epoch,
-            epochs=ADDITIONAL_EPOCHS,
-            validation_data=val_generator,
-            validation_steps=validation_steps,
-            callbacks=callbacks,
-            verbose=1
-        )
-        
-        # Use the continue training history for plotting
-        combined_history = history_continue.history
-        
-    else:
-        # Original training phases for fresh training
-        print("\n" + "="*50)
-        print("PHASE 1: Training with frozen VGG16 base")
-        print("="*50)
+def train_phase1(model, train_generator, val_generator, config, callbacks, logger):
+    """Train Phase 1: Frozen VGG16 base."""
+    logger.info("=" * 50)
+    logger.info("PHASE 1: Training with frozen VGG16 base")
+    logger.info("=" * 50)
+    
+    steps_per_epoch = train_generator.samples // config.BATCH_SIZE
+    validation_steps = val_generator.samples // config.BATCH_SIZE
+    
+    logger.info(f"Steps per epoch: {steps_per_epoch}")
+    logger.info(f"Validation steps: {validation_steps}")
+    
+    history_phase1 = model.fit(
+        train_generator,
+        steps_per_epoch=steps_per_epoch,
+        epochs=config.EPOCHS_PHASE1,
+        validation_data=val_generator,
+        validation_steps=validation_steps,
+        callbacks=callbacks,
+        verbose=1
+    )
+    
+    logger.info("Phase 1 training completed")
+    return history_phase1
 
-        # Calculate steps per epoch based on actual data
-        steps_per_epoch = train_generator.samples // batch_size
-        validation_steps = val_generator.samples // batch_size
-        epochs_phase1 = 20
+def train_phase2(model, vgg16_base, train_generator, val_generator, config, callbacks, history_phase1, logger):
+    """Train Phase 2: Fine-tune top VGG16 layers."""
+    logger.info("=" * 50)
+    logger.info("PHASE 2: Fine-tuning top VGG16 layers")
+    logger.info("=" * 50)
+    
+    # Unfreeze top layers of VGG16
+    vgg16_base.trainable = True
+    
+    # Freeze layers before fine_tune_at
+    for layer in vgg16_base.layers[:config.FINE_TUNE_AT]:
+        layer.trainable = False
+    
+    # Use lower learning rate for fine-tuning
+    model.compile(
+        optimizer=Adam(learning_rate=config.FINE_TUNE_LEARNING_RATE),
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    
+    logger.info(f"Fine-tuning from layer {config.FINE_TUNE_AT} onwards")
+    print_model_info(model, logger, "Phase 2")
+    
+    # Show trainable layers
+    logger.info("Trainable layers in VGG16 base:")
+    for i, layer in enumerate(vgg16_base.layers):
+        if layer.trainable:
+            logger.info(f"  Layer {i}: {layer.name} - Trainable")
+    
+    steps_per_epoch = train_generator.samples // config.BATCH_SIZE
+    validation_steps = val_generator.samples // config.BATCH_SIZE
+    
+    history_phase2 = model.fit(
+        train_generator,
+        steps_per_epoch=steps_per_epoch,
+        epochs=config.EPOCHS_PHASE2,
+        initial_epoch=history_phase1.epoch[-1],
+        validation_data=val_generator,
+        validation_steps=validation_steps,
+        callbacks=callbacks,
+        verbose=1
+    )
+    
+    logger.info("Phase 2 training completed")
+    return history_phase2
 
-        print(f"Steps per epoch: {steps_per_epoch}")
-        print(f"Validation steps: {validation_steps}")
+def continue_training(model, train_generator, val_generator, config, callbacks, logger):
+    """Continue training from existing model."""
+    logger.info("=" * 50)
+    logger.info("PHASE 3: CONTINUE TRAINING FROM EXISTING MODEL")
+    logger.info("=" * 50)
+    
+    steps_per_epoch = train_generator.samples // config.BATCH_SIZE
+    validation_steps = val_generator.samples // config.BATCH_SIZE
+    
+    logger.info(f"Steps per epoch: {steps_per_epoch}")
+    logger.info(f"Validation steps: {validation_steps}")
+    logger.info(f"Additional epochs: {config.ADDITIONAL_EPOCHS}")
+    
+    # Use very low learning rate for continued training
+    model.compile(
+        optimizer=Adam(learning_rate=config.CONTINUE_LEARNING_RATE),
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    
+    print_model_info(model, logger, "Continue Training")
+    
+    history_continue = model.fit(
+        train_generator,
+        steps_per_epoch=steps_per_epoch,
+        epochs=config.ADDITIONAL_EPOCHS,
+        validation_data=val_generator,
+        validation_steps=validation_steps,
+        callbacks=callbacks,
+        verbose=1
+    )
+    
+    logger.info("Continue training completed")
+    return history_continue
 
-        history_phase1 = fine_tuned_vgg16.fit(
-            train_generator,
-            steps_per_epoch=steps_per_epoch,
-            epochs=epochs_phase1,
-            validation_data=val_generator,
-            validation_steps=validation_steps,
-            callbacks=callbacks,
-            verbose=1
-        )
+def combine_histories(hist1, hist2):
+    """Combine two training histories."""
+    combined_history = {}
+    for key in hist1.history.keys():
+        combined_history[key] = hist1.history[key] + hist2.history[key]
+    return combined_history
 
-        # Phase 2: Fine-tune top layers
-        print("\n" + "="*50)
-        print("PHASE 2: Fine-tuning top VGG16 layers")
-        print("="*50)
+def plot_training_history(history, config, title_suffix="", logger=None):
+    """Plot and save training history."""
+    if logger:
+        logger.info(f"Plotting training history{title_suffix}...")
+    
+    plt.figure(figsize=(15, 5))
+    
+    # Plot accuracy
+    plt.subplot(1, 2, 1)
+    plt.plot(history['accuracy'], label='Training Accuracy')
+    plt.plot(history['val_accuracy'], label='Validation Accuracy')
+    plt.title(f'Model Accuracy {title_suffix}', fontsize=14)
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('Accuracy', fontsize=12)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # Plot loss
+    plt.subplot(1, 2, 2)
+    plt.plot(history['loss'], label='Training Loss')
+    plt.plot(history['val_loss'], label='Validation Loss')
+    plt.title(f'Model Loss {title_suffix}', fontsize=14)
+    plt.xlabel('Epoch', fontsize=12)
+    plt.ylabel('Loss', fontsize=12)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    history_plot_path = os.path.join(config.MODELS_DIR, f'fine_tuned_vgg16_training_history{title_suffix.lower().replace(" ", "_")}.png')
+    plt.savefig(history_plot_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    if logger:
+        logger.info(f"Training history plot saved: {history_plot_path}")
 
-        # Unfreeze top layers of VGG16
-        vgg16_base.trainable = True
 
-        # Fine-tune from this layer onwards
-        fine_tune_at = 15
 
-        # Freeze all the layers before the `fine_tune_at` layer
-        for layer in vgg16_base.layers[:fine_tune_at]:
-            layer.trainable = False
-
-        # Use a lower learning rate for fine-tuning
-        fine_tuned_vgg16.compile(
-            optimizer=Adam(learning_rate=FINE_TUNE_LEARNING_RATE),
-            loss='categorical_crossentropy',
-            metrics=['accuracy']
-        )
-
-        print(f"\nPhase 2 - Fine-tuning enabled:")
-        print(f"Fine-tuning from layer {fine_tune_at} onwards")
-        print(f"Total params: {fine_tuned_vgg16.count_params():,}")
-        print(f"Trainable params: {sum([tf.keras.backend.count_params(w) for w in fine_tuned_vgg16.trainable_weights]):,}")
-        print(f"Non-trainable params: {sum([tf.keras.backend.count_params(w) for w in fine_tuned_vgg16.non_trainable_weights]):,}")
-        print(f"Number of trainable variables: {len(fine_tuned_vgg16.trainable_variables)}")
-
-        # Show which layers are trainable
-        print(f"\nTrainable layers in VGG16 base:")
-        for i, layer in enumerate(vgg16_base.layers):
-            if layer.trainable:
-                print(f"  Layer {i}: {layer.name} - Trainable")
-
-        # Continue training
-        epochs_phase2 = 30
-        total_epochs = epochs_phase1 + epochs_phase2
-
-        history_phase2 = fine_tuned_vgg16.fit(
-            train_generator,
-            steps_per_epoch=steps_per_epoch,
-            epochs=epochs_phase2,
-            initial_epoch=history_phase1.epoch[-1],
-            validation_data=val_generator,
-            validation_steps=validation_steps,
-            callbacks=callbacks,
-            verbose=1
-        )
-
-        # Combine training histories
-        def combine_histories(hist1, hist2):
-            combined_history = {}
-            for key in hist1.history.keys():
-                combined_history[key] = hist1.history[key] + hist2.history[key]
-            return combined_history
-
-        combined_history = combine_histories(history_phase1, history_phase2)
-
-    # Plot training results
-    def plot_training_history(history, title_suffix=""):
-        plt.figure(figsize=(15, 5))
-        
-        # Plot accuracy
-        plt.subplot(1, 2, 1)
-        plt.plot(history['accuracy'], label='Training Accuracy')
-        plt.plot(history['val_accuracy'], label='Validation Accuracy')
-        plt.title(f'Model Accuracy {title_suffix}', fontsize=14)
-        plt.xlabel('Epoch', fontsize=12)
-        plt.ylabel('Accuracy', fontsize=12)
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        # Plot loss
-        plt.subplot(1, 2, 2)
-        plt.plot(history['loss'], label='Training Loss')
-        plt.plot(history['val_loss'], label='Validation Loss')
-        plt.title(f'Model Loss {title_suffix}', fontsize=14)
-        plt.xlabel('Epoch', fontsize=12)
-        plt.ylabel('Loss', fontsize=12)
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        history_plot_path = os.path.join(models_dir, f'fine_tuned_vgg16_training_history{title_suffix.lower().replace(" ", "_")}.png')
-        plt.savefig(history_plot_path, dpi=300, bbox_inches='tight')
-        plt.show()
-
-    print("\n" + "="*50)
-    print("TRAINING RESULTS")
-    print("="*50)
-
-    plot_training_history(combined_history)
-else:
-    print("\n" + "="*50)
-    print("SKIPPING TRAINING - USING LOADED MODEL")
-    print("="*50)
-    # Calculate steps for evaluation
-    steps_per_epoch = train_generator.samples // batch_size
-    validation_steps = val_generator.samples // batch_size
-
-# Evaluate on test set
-print("\n" + "="*50)
-print("EVALUATING ON TEST SET")
-print("="*50)
-
-# For evaluation, we'll use the validation generator as test data
-test_loss, test_accuracy = fine_tuned_vgg16.evaluate(val_generator, steps=validation_steps, verbose=1)
-print(f"\nTest Accuracy: {test_accuracy:.4f}")
-print(f"Test Loss: {test_loss:.4f}")
-
-# Generate predictions for confusion matrix
-print("\nGenerating predictions for confusion matrix...")
-
-# Reset the generator
-val_generator.reset()
-
-# Get predictions
-test_predictions = fine_tuned_vgg16.predict(val_generator, steps=validation_steps, verbose=1)
-test_pred_classes = np.argmax(test_predictions, axis=1)
-
-# Get true labels from generator
-val_generator.reset()
-test_labels = val_generator.classes
-
-# Ensure we have the right number of predictions
-min_len = min(len(test_pred_classes), len(test_labels))
-test_pred_classes = test_pred_classes[:min_len]
-test_labels = test_labels[:min_len]
-
-print(f"Number of test samples: {len(test_labels)}")
-print(f"Number of predictions: {len(test_pred_classes)}")
-
-# Generate confusion matrix
-cm = confusion_matrix(test_labels, test_pred_classes)
-cm_normalized = confusion_matrix(test_labels, test_pred_classes, normalize='true')
-
-# Plot confusion matrices
-fig, axes = plt.subplots(1, 2, figsize=(20, 8))
-
-# Non-normalized confusion matrix
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-            xticklabels=class_names, yticklabels=class_names, ax=axes[0])
-axes[0].set_title('Confusion Matrix (Raw Counts)', fontsize=16)
-axes[0].set_xlabel('Predicted Label', fontsize=14)
-axes[0].set_ylabel('True Label', fontsize=14)
-
-# Normalized confusion matrix
-sns.heatmap(cm_normalized, annot=True, fmt='.3f', cmap='Blues', 
-            xticklabels=class_names, yticklabels=class_names, ax=axes[1])
-axes[1].set_title('Normalized Confusion Matrix', fontsize=16)
-axes[1].set_xlabel('Predicted Label', fontsize=14)
-axes[1].set_ylabel('True Label', fontsize=14)
-
-plt.tight_layout()
-confusion_matrix_path = os.path.join(models_dir, 'fine_tuned_vgg16_confusion_matrices.png')
-plt.savefig(confusion_matrix_path, dpi=300, bbox_inches='tight')
-plt.show()
-
-# Classification report
-print("\n" + "="*50)
-print("CLASSIFICATION REPORT")
-print("="*50)
-print(classification_report(test_labels, test_pred_classes, 
-                          target_names=class_names, digits=4))
-
-# Calculate per-class accuracy
-per_class_accuracy = cm_normalized.diagonal()
-print("\n" + "="*50)
-print("PER-CLASS ACCURACY")
-print("="*50)
-for i, class_name in enumerate(class_names):
-    print(f"{class_name:12}: {per_class_accuracy[i]:.4f} ({per_class_accuracy[i]*100:.2f}%)")
-
-# Save the final model (only if training was performed)
-if not skip_training:
-    print("\n" + "="*50)
-    print("SAVING MODEL")
-    print("="*50)
-
-    # Save in different formats
-    model_name = "fine_tuned_vgg16_final"
-
-    # Save as .keras file (recommended native format)
-    keras_path = os.path.join(models_dir, f"{model_name}.keras")
-    fine_tuned_vgg16.save(keras_path)
-    print(f"Model saved as {keras_path}")
-
-    # Save in SavedModel format for deployment
-    savedmodel_path = os.path.join(models_dir, f"{model_name}_savedmodel")
+def main():
+    """Main training function."""
+    logger = setup_logger()
+    config = Config()
+    
+    # Set random seeds
+    np.random.seed(42)
+    tf.random.set_seed(42)
+    
+    logger.info("=" * 60)
+    logger.info("FINE-TUNED VGG16 TRAINING PIPELINE")
+    logger.info("=" * 60)
+    logger.info(f"Number of classes: {config.NUM_CLASSES}")
+    logger.info(f"Image size: {config.IMG_HEIGHT}x{config.IMG_WIDTH}")
+    logger.info(f"Batch size: {config.BATCH_SIZE}")
+    
     try:
-        fine_tuned_vgg16.export(savedmodel_path)
-        print(f"Model exported as {savedmodel_path} (SavedModel format)")
-    except AttributeError:
-        # Fallback for older TensorFlow versions
-        fine_tuned_vgg16.save(savedmodel_path, save_format='tf')
-        print(f"Model saved as {savedmodel_path} (SavedModel format)")
-
-    # Save weights only
-    weights_path = os.path.join(models_dir, f"{model_name}.weights.h5")
-    fine_tuned_vgg16.save_weights(weights_path)
-    print(f"Model weights saved as {weights_path}")
-
-    # Save training history
-    import pickle
-    history_path = os.path.join(models_dir, f"{model_name}_history.pkl")
-    with open(history_path, 'wb') as f:
-        pickle.dump(combined_history, f)
-    print(f"Training history saved as {history_path}")
-else:
-    print("\n" + "="*50)
-    print("MODEL ALREADY EXISTS - SKIPPING SAVE")
-    print("="*50)
-    model_name = "fine_tuned_vgg16_final"
-
-print("\n" + "="*50)
-print("TRAINING COMPLETED SUCCESSFULLY!")
-print("="*50)
-print(f"Final Test Accuracy: {test_accuracy:.4f} ({test_accuracy*100:.2f}%)")
-print(f"Model saved as: {model_name}")
-print("Files generated:")
-print(f"  - {model_name}.keras (native Keras format - recommended)")
-print(f"  - {model_name}.h5 (legacy HDF5 format)")
-print(f"  - {model_name}_savedmodel/ (SavedModel format for deployment)")
-print(f"  - {model_name}_weights.h5 (weights only)")
-print(f"  - {model_name}_history.pkl (training history)")
-print("  - fine_tuned_vgg16_training_history.png")
-print("  - fine_tuned_vgg16_confusion_matrices.png")
-print("  - fine_tuned_vgg16_training.log")
-
-# OPTIONAL: Different training strategies (comment/uncomment as needed)
-
-# Strategy 1: Train entire VGG16 from scratch (NOT recommended for small datasets)
-# vgg16_base.trainable = True
-# fine_tuned_vgg16.compile(optimizer=Adam(learning_rate=0.0001), loss='categorical_crossentropy', metrics=['accuracy'])
-
-# Strategy 2: Fine-tune more layers from the beginning
-# fine_tune_at = 10  # Instead of 15, unfreeze more layers
-# for layer in vgg16_base.layers[:fine_tune_at]:
-#     layer.trainable = False
-
-# Strategy 3: Different fine-tuning point (current is 15)
-# You can experiment with different values: 10, 12, 17, etc.
+        check_directories(config, logger)
+        
+        train_generator, val_generator = create_data_generators(config, logger)
+        
+        model, vgg16_base, skip_training = load_or_create_model(config, logger)
+        
+        print_model_info(model, logger)
+        
+        combined_history = None
+        
+        if not skip_training:
+            callbacks = create_callbacks(config, logger)
+            
+            if config.CONTINUE_TRAINING and os.path.exists(os.path.join(config.MODELS_DIR, "fine_tuned_vgg16_final.keras")):
+                history_continue = continue_training(model, train_generator, val_generator, config, callbacks, logger)
+                combined_history = history_continue.history
+            else:
+                history_phase1 = train_phase1(model, train_generator, val_generator, config, callbacks, logger)
+                
+                history_phase2 = train_phase2(model, vgg16_base, train_generator, val_generator, config, callbacks, history_phase1, logger)
+                
+                combined_history = combine_histories(history_phase1, history_phase2)
+            
+            logger.info("=" * 50)
+            logger.info("TRAINING RESULTS")
+            logger.info("=" * 50)
+            plot_training_history(combined_history, config, logger=logger)
+        else:
+            logger.info("=" * 50)
+            logger.info("SKIPPING TRAINING - USING LOADED MODEL")
+            logger.info("=" * 50)
+        
+        test_accuracy, test_loss = evaluate_model(model, val_generator, config, logger)
+        
+        if not skip_training:
+            save_model(model, config, combined_history, logger)
+        else:
+            logger.info("=" * 50)
+            logger.info("MODEL ALREADY EXISTS - SKIPPING SAVE")
+            logger.info("=" * 50)
+        
+        # Final summary
+        logger.info("=" * 60)
+        logger.info("TRAINING COMPLETED SUCCESSFULLY!")
+        logger.info("=" * 60)
+        logger.info(f"Final Test Accuracy: {test_accuracy:.4f} ({test_accuracy*100:.2f}%)")
+        logger.info("Files generated:")
+        logger.info(f"  - fine_tuned_vgg16_final.keras (native Keras format)")
+        logger.info(f"  - fine_tuned_vgg16_final.h5 (legacy HDF5 format)")
+        logger.info(f"  - fine_tuned_vgg16_final_savedmodel/ (SavedModel format)")
+        logger.info(f"  - fine_tuned_vgg16_final.weights.h5 (weights only)")
+        logger.info(f"  - fine_tuned_vgg16_training_history.png")
+        logger.info(f"  - fine_tuned_vgg16_confusion_matrices.png")
+        logger.info(f"  - fine_tuned_vgg16_training.log")
+        
+    except Exception as e:
+        logger.error(f"Training failed: {e}")
+        raise
 
 if __name__ == "__main__":
-    # This ensures the script runs when executed directly
-    print("Fine-Tuned VGG16 Training Script")
-    print("Make sure your data is in the following structure:")
-    print("output/")
-    print("  train/")
-    print("    complex/")
-    print("    flat/")
-    print("    gable/")
-    print("    halfhip/")
-    print("    hip/")
-    print("    L-shaped/")
-    print("    pyramid/")
-    print("  val/")
-    print("    complex/")
-    print("    flat/")
-    print("    gable/")
-    print("    halfhip/")
-    print("    hip/")
-    print("    L-shaped/")
-    print("    pyramid/")
-    print("\nStarting training process...")
+    main()

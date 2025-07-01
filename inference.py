@@ -35,15 +35,18 @@ Supported image formats: .jpg, .jpeg, .png, .bmp, .tiff, .tif
 import os
 import sys
 import argparse
+import logging
+
 import numpy as np
 import pandas as pd
+
 import matplotlib.pyplot as plt
 from PIL import Image
+
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import img_to_array, load_img
-from tensorflow.keras.models import load_model
-import warnings
-warnings.filterwarnings('ignore')
+
+from utils.loader import load_trained_model
 
 # Configuration
 IMG_HEIGHT = 140
@@ -51,49 +54,6 @@ IMG_WIDTH = 140
 CLASS_NAMES = ['complex', 'flat', 'gable', 'halfhip', 'hip', 'L-shaped', 'pyramid']
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.jp2'}
 
-def find_best_model():
-    """
-    Automatically find the best available model in the models directory.
-    Priority: .keras > .h5 > savedmodel
-    """
-    models_dir = "models"
-    model_candidates = [
-        "fine_tuned_vgg16_final.keras",
-        "best_fine_tuned_vgg16.keras",
-        "fine_tuned_vgg16_final.h5",
-        "best_fine_tuned_vgg16.h5",
-        "fine_tuned_vgg16_final.wheight.h5",
-        "fine_tuned_vgg16_final_savedmodel"
-    ]
-    
-    # Check if models directory exists
-    if not os.path.exists(models_dir):
-        raise FileNotFoundError(f"Models directory '{models_dir}' not found!")
-    
-    for model_name in model_candidates:
-        model_path = os.path.join(models_dir, model_name)
-        if os.path.exists(model_path):
-            return model_path
-    
-    raise FileNotFoundError(
-        f"No trained model found in '{models_dir}' directory! Please ensure you have one of the following files:\n" +
-        "\n".join([f"  - {models_dir}/{path}" for path in model_candidates])
-    )
-
-def load_trained_model(model_path=None):
-    """Load the trained model."""
-    if model_path is None:
-        model_path = find_best_model()
-    
-    print(f"Loading model from: {model_path}")
-    
-    try:
-        model = load_model(model_path)
-        print("Model loaded successfully!")
-        return model
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        sys.exit(1)
 
 def get_image_files(directory):
     """Get all supported image files from directory."""
@@ -112,8 +72,10 @@ def get_image_files(directory):
     
     return sorted(image_files)
 
-def preprocess_image(image_path):
+def preprocess_image(image_path, logger=None):
     """Preprocess a single image for prediction."""
+    if logger is None:
+        logger = logging.getLogger(__name__)
     try:
         # Load and resize image
         img = load_img(image_path, target_size=(IMG_HEIGHT, IMG_WIDTH))
@@ -122,12 +84,12 @@ def preprocess_image(image_path):
         img_array = img_array / 255.0  # Normalize to [0,1]
         return img_array, True
     except Exception as e:
-        print(f"Error processing {image_path}: {e}")
+        logger.error(f"Error processing {image_path}: {e}")
         return None, False
 
-def predict_single_image(model, image_path, confidence_threshold=0.0):
+def predict_single_image(model, image_path, confidence_threshold=0.0, logger=None):
     """Make prediction for a single image."""
-    img_array, success = preprocess_image(image_path)
+    img_array, success = preprocess_image(image_path, logger)
     
     if not success:
         return None
@@ -152,9 +114,10 @@ def predict_single_image(model, image_path, confidence_threshold=0.0):
     
     return result
 
-def save_results_to_csv(results, output_path):
+def save_results_to_csv(results, output_path, logger=None):
     """Save prediction results to CSV file."""
-    # Prepare data for CSV
+    if logger is None:
+        logger = logging.getLogger(__name__)
     csv_data = []
     for result in results:
         if result is None:
@@ -174,20 +137,22 @@ def save_results_to_csv(results, output_path):
         
         csv_data.append(row)
     
-    # Create DataFrame and save
     df = pd.DataFrame(csv_data)
     df.to_csv(output_path, index=False)
-    print(f"📊 Results saved to CSV: {output_path}")
+    logger.info(f"Results saved to CSV: {output_path}")
+    return 
 
-def visualize_predictions(results, output_dir, max_images=20):
+def visualize_predictions(results, output_dir, max_images=20, logger=None):
     """Create visualization of predictions."""
+    if logger is None:
+        logger = logging.getLogger(__name__)
+        
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
     # Filter successful predictions
     valid_results = [r for r in results if r is not None]
     
-    # Show top predictions by confidence
     valid_results.sort(key=lambda x: x['confidence'], reverse=True)
     
     # Create visualization for top predictions
@@ -203,14 +168,12 @@ def visualize_predictions(results, output_dir, max_images=20):
         row = idx // cols
         col = idx % cols
         result = valid_results[idx]
-        
-        # Load and display image
+    
         try:
             img = Image.open(result['image_path'])
             axes[row, col].imshow(img)
             axes[row, col].axis('off')
             
-            # Title with prediction
             title = f"{result['image_name']}\n{result['predicted_class']} ({result['confidence']:.3f})"
             axes[row, col].set_title(title, fontsize=10)
             
@@ -230,14 +193,14 @@ def visualize_predictions(results, output_dir, max_images=20):
     plt.savefig(viz_path, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"📈 Visualization saved to: {viz_path}")
+    logger.info(f"Visualization saved to: {viz_path}")
 
 def print_summary_statistics(results):
     """Print summary statistics of predictions."""
     valid_results = [r for r in results if r is not None]
     
     if not valid_results:
-        print("❌ No valid predictions to summarize")
+        print("No valid predictions to summarize")
         return
     
     print("\n" + "="*60)
@@ -283,6 +246,9 @@ def print_summary_statistics(results):
     print(f"  Median:          {np.median(confidence_scores):.3f}")
 
 def main():
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    
     parser = argparse.ArgumentParser(
         description="Building Roof Type Classification - Inference Script",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -314,27 +280,27 @@ Examples:
     
     args = parser.parse_args()
     
-    print("="*60)
-    print("BUILDING ROOF TYPE CLASSIFICATION - INFERENCE")
-    print("="*60)
+    logger.info("="*60)
+    logger.info("BUILDING ROOF TYPE CLASSIFICATION - INFERENCE")
+    logger.info("="*60)
     
     # Load model
     model = load_trained_model(args.model_path)
     
     # Get image files
-    print(f"\nScanning directory: {args.input_dir}")
+    logger.info(f"\nScanning directory: {args.input_dir}")
     image_files = get_image_files(args.input_dir)
-    print(f"Found {len(image_files)} image files")
+    logger.info(f"Found {len(image_files)} image files")
     
     # Process images
-    print(f"\nProcessing images...")
+    logger.info(f"\nProcessing images...")
     results = []
     successful_count = 0
     
     for i, image_path in enumerate(image_files, 1):
-        print(f"Processing {i}/{len(image_files)}: {os.path.basename(image_path)}", end="")
+        logger.info(f"Processing {i}/{len(image_files)}: {os.path.basename(image_path)}")
         
-        result = predict_single_image(model, image_path, args.confidence_threshold)
+        result = predict_single_image(model, image_path, args.confidence_threshold, logger)
         results.append(result)
         
         if result is not None:
@@ -342,39 +308,36 @@ Examples:
             confidence_emoji = "🟢" if result['confidence'] > 0.8 else "🟡" if result['confidence'] > 0.5 else "🔴"
             threshold_emoji = "✅" if result['meets_threshold'] else "❌"
             
-            print(f" → {result['predicted_class']} ({result['confidence']:.3f}) {confidence_emoji} {threshold_emoji}")
+            logger.info(f" → {result['predicted_class']} ({result['confidence']:.3f}) {confidence_emoji} {threshold_emoji}")
         else:
-            print(" → ❌ Failed")
+            logger.error(" → ❌ Failed")
     
-    # Print summary
     print_summary_statistics(results)
     
-    # Save results to CSV if requested
     if args.output_csv:
         save_results_to_csv(results, args.output_csv)
     
-    # Create visualization if requested
     if args.visualize:
-        print(f"\nCreating visualization...")
-        visualize_predictions(results, args.output_dir, args.max_viz_images)
+        logger.info(f"\nCreating visualization...")
+        visualize_predictions(results, args.output_dir, args.max_viz_images, logger)
     
     # Print final summary
-    print(f"\n" + "="*60)
-    print("INFERENCE COMPLETED")
-    print("="*60)
-    print(f"Total images: {len(image_files)}")
-    print(f"Successful predictions: {successful_count}")
-    print(f"Success rate: {(successful_count/len(image_files)*100):.1f}%")
+    logger.info(f"\n" + "="*60)
+    logger.info("INFERENCE COMPLETED")
+    logger.info("="*60)
+    logger.info(f"Total images: {len(image_files)}")
+    logger.info(f"Successful predictions: {successful_count}")
+    logger.info(f"Success rate: {(successful_count/len(image_files)*100):.1f}%")
     
     if args.confidence_threshold > 0:
         above_threshold = sum(1 for r in results if r and r['meets_threshold'])
-        print(f"Predictions above threshold ({args.confidence_threshold}): {above_threshold}")
+        logger.info(f"Predictions above threshold ({args.confidence_threshold}): {above_threshold}")
     
-    print("\nFiles generated:")
+    logger.info("\nFiles generated:")
     if args.output_csv:
-        print(f"  - {args.output_csv} (detailed results)")
+        logger.info(f"  - {args.output_csv} (detailed results)")
     if args.visualize:
-        print(f"  - {args.output_dir}/predictions_visualization.png")
+        logger.info(f"  - {args.output_dir}/predictions_visualization.png")
 
 if __name__ == "__main__":
     main()

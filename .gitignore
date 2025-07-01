@@ -1,3 +1,4 @@
 /output
 /orthophoto_results
 /models/*
+**/__pycache__/
