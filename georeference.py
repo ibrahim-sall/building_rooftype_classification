@@ -10,16 +10,24 @@ import sys
 import argparse
 import numpy as np
 
-try:
-    import rasterio
-    from rasterio.transform import from_bounds
-    import geopandas as gpd
-    GIS_AVAILABLE = True
-except ImportError:
-    print("❌ GIS libraries not available. Install with: pip install geopandas rasterio")
-    sys.exit(1)
 
-def georeference_dsm(dsm_path, footprint_path, output_path, target_crs="EPSG:25832"):
+import rasterio
+from rasterio.transform import from_bounds
+import geopandas as gpd
+import logging
+
+
+def setup_logger():
+    """Setup and return a logger instance."""
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    return logging.getLogger(__name__)
+
+
+def georeference_dsm(dsm_path, footprint_path, output_path, target_crs="EPSG:25832", logger=None):
     """
     Add georeferencing to a DSM based on footprint bounds.
     
@@ -29,26 +37,24 @@ def georeference_dsm(dsm_path, footprint_path, output_path, target_crs="EPSG:258
         output_path: Path for the georeferenced DSM
         target_crs: Target coordinate reference system
     """
-    print(f"🔍 Georeferencing DSM: {os.path.basename(dsm_path)}")
+    if logger is None:
+        logger = logging.getLogger(__name__)
     
-    # Load footprints to get bounds
+
     footprints = gpd.read_file(footprint_path)
-    print(f"📍 Footprint bounds: {footprints.total_bounds}")
+    logger.info(f"📍 Footprint bounds: {footprints.total_bounds}")
     
     minx, miny, maxx, maxy = footprints.total_bounds
     
-    # Load DSM
     with rasterio.open(dsm_path) as src:
-        print(f"📏 DSM dimensions: {src.width} x {src.height}")
-        print(f"🔢 DSM data type: {src.dtypes[0]}")
-        
-        # Read the DSM data
+
         dsm_data = src.read(1)
         
-        # Create transform from bounds
         transform = from_bounds(minx, miny, maxx, maxy, src.width, src.height)
         
-        # Write georeferenced DSM
+        logger.info(f"📏 DSM dimensions: {src.width} x {src.height}")
+        logger.info(f"🔢 DSM data type: {src.dtypes[0]}")
+        
         with rasterio.open(
             output_path, 'w',
             driver='GTiff',
@@ -62,12 +68,13 @@ def georeference_dsm(dsm_path, footprint_path, output_path, target_crs="EPSG:258
         ) as dst:
             dst.write(dsm_data, 1)
     
-    print(f"✅ Georeferenced DSM saved: {output_path}")
-    print(f"🗺️  CRS: {target_crs}")
-    print(f"📍 Bounds: ({minx:.3f}, {miny:.3f}, {maxx:.3f}, {maxy:.3f})")
-    print(f"📏 Pixel size: {(maxx-minx)/src.width:.3f} x {(maxy-miny)/src.height:.3f}")
 
-def batch_georeference_dsm(dsm_dir, footprint_dir, output_dir, target_crs="EPSG:25832"):
+    logger.info(f"✅ Georeferenced DSM saved: {output_path}")
+    logger.info(f"🗺️  CRS: {target_crs}")
+    logger.info(f"📍 Bounds: ({minx:.3f}, {miny:.3f}, {maxx:.3f}, {maxy:.3f})")
+    logger.info(f"📏 Pixel size: {(maxx-minx)/src.width:.3f} x {(maxy-miny)/src.height:.3f}")
+
+def batch_georeference_dsm(dsm_dir, footprint_dir, output_dir, target_crs="EPSG:25832", logger=None):
     """
     Georeference all DSM files in a directory using corresponding footprint files.
     
@@ -77,26 +84,25 @@ def batch_georeference_dsm(dsm_dir, footprint_dir, output_dir, target_crs="EPSG:
         output_dir: Directory for georeferenced DSM outputs
         target_crs: Target coordinate reference system
     """
-    print(f"🔍 Batch georeferencing DSMs from: {dsm_dir}")
-    print(f"📁 Footprint directory: {footprint_dir}")
-    print(f"📁 Output directory: {output_dir}")
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    logger.info(f"🔍 Batch georeferencing DSMs from: {dsm_dir}")
     
-    # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
     
-    # Find all DSM files
     dsm_files = []
     for filename in os.listdir(dsm_dir):
         if filename.lower().endswith(('.tif', '.tiff')):
             dsm_files.append(filename)
     
     if not dsm_files:
-        print("❌ No DSM files found in directory")
+        logger.error("No dsm files found in dir")
         return
     
-    print(f"📊 Found {len(dsm_files)} DSM files")
+    logger.info(f"📊 Found {len(dsm_files)} DSM files")
     
     processed = 0
+    
     for dsm_filename in dsm_files:
         dsm_path = os.path.join(dsm_dir, dsm_filename)
         base_name = os.path.splitext(dsm_filename)[0]
@@ -128,11 +134,11 @@ def batch_georeference_dsm(dsm_dir, footprint_dir, output_dir, target_crs="EPSG:
                 georeference_dsm(dsm_path, footprint_path, output_path, target_crs)
                 processed += 1
             except Exception as e:
-                print(f"❌ Error processing {dsm_filename}: {e}")
+                logger.error(f"❌ Error processing {dsm_filename}: {e}")
         else:
-            print(f"⚠️  No footprint file found for {dsm_filename}")
+            logger.warning(f"⚠️  No footprint file found for {dsm_filename}")
     
-    print(f"\n✅ Batch processing completed: {processed}/{len(dsm_files)} files processed")
+    logger.info(f"\n✅ Batch processing completed: {processed}/{len(dsm_files)} files processed")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -157,28 +163,28 @@ Examples:
     
     args = parser.parse_args()
     
+    logger = setup_logger()
+    
     if args.batch:
-        # Batch processing mode
         if not os.path.exists(args.path1):
-            print(f"❌ DSM directory not found: {args.path1}")
+            logger.error(f"DSM directory not found: {args.path1}")
             sys.exit(1)
         
         if not os.path.exists(args.path2):
-            print(f"❌ Footprint directory not found: {args.path2}")
+            logger.error(f"Footprint directory not found: {args.path2}")
             sys.exit(1)
         
-        batch_georeference_dsm(args.path1, args.path2, args.path3, args.crs)
+        batch_georeference_dsm(args.path1, args.path2, args.path3, args.crs, logger)
     else:
-        # Single file processing mode
         if not os.path.exists(args.path1):
-            print(f"❌ DSM file not found: {args.path1}")
+            logger.error(f"DSM file not found: {args.path1}")
             sys.exit(1)
         
         if not os.path.exists(args.path2):
-            print(f"❌ Footprint file not found: {args.path2}")
+            logger.error(f"Footprint file not found: {args.path2}")
             sys.exit(1)
         
-        georeference_dsm(args.path1, args.path2, args.path3, args.crs)
+        georeference_dsm(args.path1, args.path2, args.path3, args.crs, logger)
 
 if __name__ == "__main__":
     main()
