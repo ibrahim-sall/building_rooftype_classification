@@ -69,6 +69,11 @@ import os
 import sys
 import logging
 import argparse
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=all, 1=info, 2=warning, 3=error
+os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
+os.environ['TF_GPU_THREAD_COUNT'] = '1'
+
 import numpy as np
 import pandas as pd
 
@@ -83,6 +88,9 @@ from utils.footprints import *
 
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import img_to_array
+
+tf.get_logger().setLevel('ERROR')
+tf.autograph.set_verbosity(0)
 
 import cv2
 from skimage.util import view_as_windows
@@ -263,9 +271,9 @@ Directory Structure:
 
 
 if __name__ == "__main__":
-    
+
     logging.basicConfig(
-        level=logging.WARNING,
+        level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
