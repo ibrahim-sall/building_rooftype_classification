@@ -52,7 +52,7 @@ def run_full_test():
         "--output_csv", "test_results.csv"
     ]
     
-    print("🚀 Running inference script...")
+    print("Running inference script...")
     print(f"Command: {' '.join(cmd)}")
     
     try:
