@@ -14,19 +14,17 @@ import rasterio
 from rasterio.transform import from_bounds
 from PIL import Image
 
-def create_test_data(test_dir="test_data"):
+def create_test_data():
     """Create minimal test data for orthophoto inference testing."""
-    print(f"Creating test data in: {test_dir}")
     
-    os.makedirs(test_dir, exist_ok=True)
-    footprints_dir = os.path.join(test_dir, "footprints")
-    dsm_dir = os.path.join(test_dir, "dsm")
+    footprints_dir =  "./footprints"
+    dsm_dir = "./dsm"
     os.makedirs(footprints_dir, exist_ok=True)
     os.makedirs(dsm_dir, exist_ok=True)
 
     minx, miny, maxx, maxy = 563000, 5934000, 563500, 5934500
     
-    orthophoto_path = os.path.join(test_dir, "test_orthophoto.tif")
+    orthophoto_path = "./test_orthophoto.tif"
     
     width, height = 500, 500
     rgb_data = np.random.randint(0, 255, size=(3, height, width), dtype=np.uint8)

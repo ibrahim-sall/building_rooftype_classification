@@ -93,13 +93,11 @@ def cleanup():
     """Clean up test files."""
     print("\n Cleaning up...")
     
-    # Remove mock model
     model_path = "./models/fine_tuned_vgg16_final_mock.keras"
     if os.path.exists(model_path):
         os.remove(model_path)
         print(f"   Removed: {model_path}")
 
-    print("(Keeping test results for inspection)")
 
 if __name__ == "__main__":
     print("FULL PIPELINE TEST")
