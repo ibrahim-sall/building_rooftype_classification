@@ -18,7 +18,6 @@ def evaluate_model(model, val_generator, config, logger):
     
     validation_steps = val_generator.samples // config.BATCH_SIZE
     
-    # Evaluate model
     test_loss, test_accuracy = model.evaluate(val_generator, steps=validation_steps, verbose=1)
     logger.info(f"Test Accuracy: {test_accuracy:.4f}")
     logger.info(f"Test Loss: {test_loss:.4f}")
@@ -89,17 +88,10 @@ def save_model(model, config, combined_history, logger):
     
     model_name = "fine_tuned_vgg16_final"
     
-    # Save as .keras file (recommended)
     keras_path = os.path.join(config.MODELS_DIR, f"{model_name}.keras")
     model.save(keras_path)
     logger.info(f"Model saved as {keras_path}")
     
-    # Save as .h5 file (legacy)
-    h5_path = os.path.join(config.MODELS_DIR, f"{model_name}.h5")
-    model.save(h5_path)
-    logger.info(f"Model saved as {h5_path}")
-    
-    # Save in SavedModel format
     savedmodel_path = os.path.join(config.MODELS_DIR, f"{model_name}_savedmodel")
     try:
         model.export(savedmodel_path)
@@ -108,12 +100,10 @@ def save_model(model, config, combined_history, logger):
         model.save(savedmodel_path, save_format='tf')
         logger.info(f"Model saved as {savedmodel_path} (SavedModel format)")
     
-    # Save weights only
     weights_path = os.path.join(config.MODELS_DIR, f"{model_name}.weights.h5")
     model.save_weights(weights_path)
     logger.info(f"Model weights saved as {weights_path}")
     
-    # Save training history
     if combined_history:
         history_path = os.path.join(config.MODELS_DIR, f"{model_name}_history.pkl")
         with open(history_path, 'wb') as f:
