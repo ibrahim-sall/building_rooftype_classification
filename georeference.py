@@ -42,7 +42,7 @@ def georeference_dsm(dsm_path, footprint_path, output_path, target_crs="EPSG:258
     
 
     footprints = gpd.read_file(footprint_path)
-    logger.info(f"📍 Footprint bounds: {footprints.total_bounds}")
+    logger.info(f"Footprint bounds: {footprints.total_bounds}")
     
     minx, miny, maxx, maxy = footprints.total_bounds
     
@@ -52,8 +52,8 @@ def georeference_dsm(dsm_path, footprint_path, output_path, target_crs="EPSG:258
         
         transform = from_bounds(minx, miny, maxx, maxy, src.width, src.height)
         
-        logger.info(f"📏 DSM dimensions: {src.width} x {src.height}")
-        logger.info(f"🔢 DSM data type: {src.dtypes[0]}")
+        logger.info(f" DSM dimensions: {src.width} x {src.height}")
+        logger.info(f" DSM data type: {src.dtypes[0]}")
         
         with rasterio.open(
             output_path, 'w',
@@ -69,10 +69,10 @@ def georeference_dsm(dsm_path, footprint_path, output_path, target_crs="EPSG:258
             dst.write(dsm_data, 1)
     
 
-    logger.info(f"✅ Georeferenced DSM saved: {output_path}")
-    logger.info(f"🗺️  CRS: {target_crs}")
-    logger.info(f"📍 Bounds: ({minx:.3f}, {miny:.3f}, {maxx:.3f}, {maxy:.3f})")
-    logger.info(f"📏 Pixel size: {(maxx-minx)/src.width:.3f} x {(maxy-miny)/src.height:.3f}")
+    logger.info(f"Georeferenced DSM saved: {output_path}")
+    logger.info(f" CRS: {target_crs}")
+    logger.info(f"Bounds: ({minx:.3f}, {miny:.3f}, {maxx:.3f}, {maxy:.3f})")
+    logger.info(f"Pixel size: {(maxx-minx)/src.width:.3f} x {(maxy-miny)/src.height:.3f}")
 
 def batch_georeference_dsm(dsm_dir, footprint_dir, output_dir, target_crs="EPSG:25832", logger=None):
     """
@@ -86,7 +86,7 @@ def batch_georeference_dsm(dsm_dir, footprint_dir, output_dir, target_crs="EPSG:
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    logger.info(f"🔍 Batch georeferencing DSMs from: {dsm_dir}")
+    logger.info(f"Batch georeferencing DSMs from: {dsm_dir}")
     
     os.makedirs(output_dir, exist_ok=True)
     
@@ -99,7 +99,7 @@ def batch_georeference_dsm(dsm_dir, footprint_dir, output_dir, target_crs="EPSG:
         logger.error("No dsm files found in dir")
         return
     
-    logger.info(f"📊 Found {len(dsm_files)} DSM files")
+    logger.info(f"Found {len(dsm_files)} DSM files")
     
     processed = 0
     
@@ -134,11 +134,11 @@ def batch_georeference_dsm(dsm_dir, footprint_dir, output_dir, target_crs="EPSG:
                 georeference_dsm(dsm_path, footprint_path, output_path, target_crs)
                 processed += 1
             except Exception as e:
-                logger.error(f"❌ Error processing {dsm_filename}: {e}")
+                logger.error(f"Error processing {dsm_filename}: {e}")
         else:
-            logger.warning(f"⚠️  No footprint file found for {dsm_filename}")
+            logger.warning(f"No footprint file found for {dsm_filename}")
     
-    logger.info(f"\n✅ Batch processing completed: {processed}/{len(dsm_files)} files processed")
+    logger.info(f"\n Batch processing completed: {processed}/{len(dsm_files)} files processed")
 
 def main():
     parser = argparse.ArgumentParser(

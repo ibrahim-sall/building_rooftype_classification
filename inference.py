@@ -150,7 +150,6 @@ def visualize_predictions(results, output_dir, max_images=20, logger=None):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    # Filter successful predictions
     valid_results = [r for r in results if r is not None]
     
     valid_results.sort(key=lambda x: x['confidence'], reverse=True)
@@ -182,7 +181,6 @@ def visualize_predictions(results, output_dir, max_images=20, logger=None):
                               ha='center', va='center', transform=axes[row, col].transAxes)
             axes[row, col].axis('off')
     
-    # Hide unused subplots
     for idx in range(n_images, rows * cols):
         row = idx // cols
         col = idx % cols
@@ -207,7 +205,6 @@ def print_summary_statistics(results):
     print("PREDICTION SUMMARY")
     print("="*60)
     
-    # Overall statistics
     total_images = len(results)
     successful_predictions = len(valid_results)
     failed_predictions = total_images - successful_predictions
@@ -284,15 +281,12 @@ Examples:
     logger.info("BUILDING ROOF TYPE CLASSIFICATION - INFERENCE")
     logger.info("="*60)
     
-    # Load model
     model = load_trained_model(args.model_path)
-    
-    # Get image files
+
     logger.info(f"\nScanning directory: {args.input_dir}")
     image_files = get_image_files(args.input_dir)
     logger.info(f"Found {len(image_files)} image files")
     
-    # Process images
     logger.info(f"\nProcessing images...")
     results = []
     successful_count = 0
@@ -310,7 +304,7 @@ Examples:
             
             logger.info(f" → {result['predicted_class']} ({result['confidence']:.3f}) {confidence_emoji} {threshold_emoji}")
         else:
-            logger.error(" → ❌ Failed")
+            logger.error(" → Failed")
     
     print_summary_statistics(results)
     

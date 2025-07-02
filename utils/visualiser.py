@@ -47,14 +47,12 @@ def create_footprint_visualization(orthophoto_path, classified_footprints, outpu
             'unknown': 'gray'
         }
         
-        # Plot footprints
         with rasterio.open(orthophoto_path) as src:
             classified_count = 0
             unclassified_count = 0
             
             for idx, footprint in classified_footprints.iterrows():
                 try:
-                    # Convert geometry to pixel coordinates
                     geom = footprint.geometry
                     if geom.is_empty:
                         continue
@@ -64,7 +62,6 @@ def create_footprint_visualization(orthophoto_path, classified_footprints, outpu
                     else:
                         coords = list(geom.coords)
                     
-                    # Convert to pixel coordinates
                     pixel_coords = []
                     for lon, lat in coords:
                         col, row = src.index(lat, lon)
@@ -83,7 +80,6 @@ def create_footprint_visualization(orthophoto_path, classified_footprints, outpu
                         linewidth = 1
                         unclassified_count += 1
                     
-                    # Plot footprint
                     from matplotlib.patches import Polygon
                     polygon = Polygon(pixel_coords.tolist(), fill=True, 
                                         facecolor=color, edgecolor=color,

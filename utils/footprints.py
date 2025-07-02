@@ -205,34 +205,30 @@ def process_footprints(model, orthophoto_path, footprint_path, CLASS_NAMES, IMG_
         logger.info(f"Using DSM: {os.path.basename(dsm_path)}")
     
     try:
-        # Load footprints shapefile
         footprints_gdf = gpd.read_file(footprint_path)
         logger.info(f"  Loaded {len(footprints_gdf)} footprints")
         
-        # Initialize classification columns
         footprints_gdf['roof_class'] = 'unknown'
         footprints_gdf['confidence'] = 0.0
         footprints_gdf['classified'] = False
         
-        # Add probability columns for each class
         for class_name in CLASS_NAMES:
             footprints_gdf[f'prob_{class_name[:8]}'] = 0.0
         
-        # Add height columns if DSM is provided
         if dsm_path:
-            footprints_gdf['mean_height'] = np.nan  # DSM pixel values (0-255)
-            footprints_gdf['min_height'] = np.nan   # DSM pixel values (0-255)
-            footprints_gdf['max_height'] = np.nan   # DSM pixel values (0-255)
-            footprints_gdf['std_height'] = np.nan   # DSM pixel values (0-255)
-            footprints_gdf['height_px'] = 0  # Number of valid height pixels
+            footprints_gdf['mean_height'] = np.nan
+            footprints_gdf['min_height'] = np.nan
+            footprints_gdf['max_height'] = np.nan
+            footprints_gdf['std_height'] = np.nan
+            footprints_gdf['height_px'] = 0
         
         classified_count = 0
         height_extracted_count = 0
         
-        # Process each footprint
         for idx, footprint in footprints_gdf.iterrows():
             try:
-                # Extract height from DSM if provided
+                logger.debug(f"Processing footprint {idx+1}/{len(footprints_gdf)}")
+                
                 if dsm_path:
                     height_stats = extract_footprint_height(dsm_path, footprint.geometry)
                     if height_stats:
@@ -243,7 +239,6 @@ def process_footprints(model, orthophoto_path, footprint_path, CLASS_NAMES, IMG_
                         footprints_gdf.at[idx, 'height_px'] = height_stats['pixel_count']
                         height_extracted_count += 1
                 
-                # Extract footprint area from orthophoto
                 footprint_image = extract_footprint_image(
                     orthophoto_path, 
                     footprint.geometry,
@@ -253,19 +248,16 @@ def process_footprints(model, orthophoto_path, footprint_path, CLASS_NAMES, IMG_
                 if footprint_image is None:
                     continue
                 
-                # Classify the footprint
                 classification = classify_footprint_image(model, footprint_image, IMG_WIDTH=224, IMG_HEIGHT=224, CLASS_NAMES=CLASS_NAMES, logger=logging.getLogger(__name__))
                 
                 if classification is None:
                     continue
                 
-                # Check confidence threshold
                 if classification['confidence'] >= confidence_threshold:
                     footprints_gdf.at[idx, 'roof_class'] = classification['predicted_class']
                     footprints_gdf.at[idx, 'confidence'] = classification['confidence']
                     footprints_gdf.at[idx, 'classified'] = True
                     
-                    # Add class probabilities
                     for class_name in CLASS_NAMES:
                         footprints_gdf.at[idx, f'prob_{class_name[:8]}'] = classification['class_probabilities'][class_name]
                     
@@ -294,7 +286,6 @@ def pixel_to_geographic(x, y, transform):
     if transform is None:
         return x, y
     
-    # Convert pixel coordinates to geographic coordinates
     geo_x, geo_y = transform * (x, y)
     return geo_x, geo_y
 
@@ -353,7 +344,7 @@ def print_footprint_summary(all_results, CLASS_NAMES):
         print(f"  Std pixel value:  {np.std(heights):.2f}")
         print(f"  Min pixel value:  {np.min(heights):.2f}")
         print(f"  Max pixel value:  {np.max(heights):.2f}")
-        print(f"  ⚠️  Note: These are pixel values (0-255), not actual heights in meters")
+        print(f"  Note: These are pixel values (0-255), not actual heights in meters")
 
 
 
