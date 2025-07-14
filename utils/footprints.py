@@ -1,4 +1,3 @@
-
 import logging
 import os
 import numpy as np
@@ -149,11 +148,18 @@ def classify_footprint_image(model, footprint_image, IMG_WIDTH, IMG_HEIGHT, CLAS
     Args:
         model: Trained roof classification model
         footprint_image: PIL Image of the footprint area
+        IMG_WIDTH: Model input width
+        IMG_HEIGHT: Model input height
+        CLASS_NAMES: List of class names
     
     Returns:
         Dictionary with classification results
     """
     try:
+        # Log model and class information for debugging
+        if logger:
+            logger.debug(f"Classifying image with model expecting {IMG_WIDTH}x{IMG_HEIGHT}, {len(CLASS_NAMES)} classes: {CLASS_NAMES}")
+        
         # Resize to model input size
         resized_image = footprint_image.resize((IMG_WIDTH, IMG_HEIGHT), Image.LANCZOS)
         
@@ -165,6 +171,23 @@ def classify_footprint_image(model, footprint_image, IMG_WIDTH, IMG_HEIGHT, CLAS
         # Make prediction
         predictions = model.predict(image_array, verbose=0)
         predicted_class_idx = np.argmax(predictions[0])
+        
+        # Verify that prediction index is within valid range
+        if predicted_class_idx >= len(CLASS_NAMES):
+            if logger:
+                logger.error(f"Model predicted class index {predicted_class_idx}, but only {len(CLASS_NAMES)} classes available: {CLASS_NAMES}")
+            else:
+                print(f"Error: Model predicted class index {predicted_class_idx}, but only {len(CLASS_NAMES)} classes available: {CLASS_NAMES}")
+            return None
+        
+        # Verify that prediction output size matches expected classes
+        if predictions.shape[1] != len(CLASS_NAMES):
+            if logger:
+                logger.error(f"Model output has {predictions.shape[1]} classes, but CLASS_NAMES has {len(CLASS_NAMES)} classes")
+            else:
+                print(f"Error: Model output has {predictions.shape[1]} classes, but CLASS_NAMES has {len(CLASS_NAMES)} classes")
+            return None
+        
         confidence = float(predictions[0][predicted_class_idx])
         predicted_class = CLASS_NAMES[predicted_class_idx]
         
@@ -248,7 +271,7 @@ def process_footprints(model, orthophoto_path, footprint_path, CLASS_NAMES, IMG_
                 if footprint_image is None:
                     continue
                 
-                classification = classify_footprint_image(model, footprint_image, IMG_WIDTH=224, IMG_HEIGHT=224, CLASS_NAMES=CLASS_NAMES, logger=logging.getLogger(__name__))
+                classification = classify_footprint_image(model, footprint_image, IMG_WIDTH, IMG_HEIGHT, CLASS_NAMES, logger=logger)
                 
                 if classification is None:
                     continue

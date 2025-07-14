@@ -21,22 +21,17 @@ Usage:
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import classification_report, confusion_matrix
+import os
+import logging
 
-from tensorflow.keras.applications import VGG16
-from tensorflow.keras import Model
-from tensorflow.keras import layers
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import CSVLogger, EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 import tensorflow as tf
 
-import seaborn as sns
-import os
-import logging
-import pickle
 
 from utils.model import *
+import splitfolders
 
 # ============================================================================
 def setup_logger():
@@ -56,7 +51,7 @@ class Config:
     # Model behavior settings
     FORCE_RETRAIN = False
     AUTO_SKIP_IF_EXISTS = True
-    CONTINUE_TRAINING = False
+    CONTINUE_TRAINING = True
     ADDITIONAL_EPOCHS = 30
     
     # Training parameters
@@ -65,34 +60,47 @@ class Config:
     FINE_TUNE_LEARNING_RATE = 0.00001
     
     # Model parameters
-    NUM_CLASSES = 7
+    NUM_CLASSES = 6
     BATCH_SIZE = 64
     IMG_HEIGHT = 140
     IMG_WIDTH = 140
-    CLASS_NAMES = ['complex', 'flat', 'gable', 'halfhip', 'hip', 'L-shaped', 'pyramid']
+    CLASS_NAMES = ['complex', 'flat', 'gable', 'halfhip', 'hip', 'pyramid']
     
     # Directories
-    TRAIN_DIR = 'output/train'
-    VAL_DIR = 'output/val'
+    DATA_DIR = '../data.nosync/10000'
+    TRAIN_DIR = 'data/train'
+    VAL_DIR = 'data/val'
     MODELS_DIR = 'models'
     
     # Training phases
-    EPOCHS_PHASE1 = 20
-    EPOCHS_PHASE2 = 30
+    EPOCHS_PHASE1 = 50
+    EPOCHS_PHASE2 = 40
     FINE_TUNE_AT = 15
 
 def check_directories(config, logger):
-    """Check if required directories exist."""
+    """Check if required directories exist, and create train/val splits if missing."""
+
     logger.info("Checking data directories...")
-    
+
+    # If train/val directories do not exist, create them using splitfolders
+    if not (os.path.exists(config.TRAIN_DIR) and os.path.exists(config.VAL_DIR)):
+        logger.info("Train/val directories not found. Creating splits using splitfolders...")
+        splitfolders.ratio(
+            config.DATA_DIR,
+            output='data',
+            seed=42,
+            ratio=(.9, .1),
+            group_prefix=None
+        )
+        logger.info("Train/val split created.")
+
     if not os.path.exists(config.TRAIN_DIR):
         raise FileNotFoundError(f"Training directory '{config.TRAIN_DIR}' not found!")
     if not os.path.exists(config.VAL_DIR):
         raise FileNotFoundError(f"Validation directory '{config.VAL_DIR}' not found!")
-    
-    # Create models directory if it doesn't exist
+
     os.makedirs(config.MODELS_DIR, exist_ok=True)
-    
+
     logger.info("All directories found/created")
 
 def create_data_generators(config, logger):

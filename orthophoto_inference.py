@@ -107,7 +107,7 @@ from rasterio.transform import from_bounds as transform_from_bounds
 # Configuration
 IMG_HEIGHT = 140
 IMG_WIDTH = 140
-CLASS_NAMES = ['complex', 'flat', 'gable', 'halfhip', 'hip', 'L-shaped', 'pyramid']
+CLASS_NAMES = ['complex', 'flat', 'gable', 'halfhip', 'hip', 'pyramid']
 SUPPORTED_FORMATS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.jp2', '.webp', '.gif'}
 
 CLASS_COLORS = {
@@ -144,7 +144,7 @@ Examples:
   python orthophoto_inference.py --input_dir test_orthophotos/ --output_csv footprint_results.csv
   
 Directory Structure:
-  test_orthophotos/
+  orthophotos/
   ├── orthophoto1.tif
   ├── orthophoto2.tif
   └── footprints/
@@ -152,7 +152,7 @@ Directory Structure:
       └── orthophoto2_footprints.shp  (or orthophoto2.shp)
   
   Optional DSM Structure:
-  test_dsm/
+  dsm/
   ├── orthophoto1_dsm.tif  (or orthophoto1_DSM.tif)
   └── orthophoto2_dsm.tif
         """
